@@ -20,4 +20,3 @@ class MSELoss(Loss):
 
     def backward(self):
         return 2 * (self.y_pred - self.y_true) / len(self.y_true)
-    
