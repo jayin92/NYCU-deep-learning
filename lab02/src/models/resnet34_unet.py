@@ -1,9 +1,10 @@
 # Implement your ResNet34_UNet model here
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
 from src.models.unet import Up, OutConv
+import torch.nn.functional as F
+import torch.nn as nn
+import torch
+import sys
+sys.path.append('.')
 
 
 class ResNetBasicBlock(nn.Module):
@@ -26,32 +27,33 @@ class ResNetBasicBlock(nn.Module):
 
     def forward(self, x):
         identity = x
-        
+
         out = self.conv1(x)
         out = self.bn1(out)
         out = self.relu(out)
-        
+
         out = self.conv2(out)
         out = self.bn2(out)
-        
+
         # Apply downsample to identity if needed
         identity = self.downsample(identity)
-        
+
         # Add residual connection
         out = out + identity
         out = self.relu(out)
-        
+
         return out
+
 
 class ResNet34Encoder(nn.Module):
     def __init__(self):
         super(ResNet34Encoder, self).__init__()
         # Define the ResNet34 encoder
-        self.conv1 = nn.Conv2d(3, 64, kernel_size=7,
+        self.conv1 = nn.Conv2d(3, 32, kernel_size=7,
                                stride=2, padding=3, bias=False)
-        self.bn1 = nn.BatchNorm2d(64)
+        self.bn1 = nn.BatchNorm2d(32)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        self.conv2_x = self._make_layer(64, 64, 3)
+        self.conv2_x = self._make_layer(32, 64, 3)
         self.conv3_x = self._make_layer(64, 128, 4, stride=2)
         self.conv4_x = self._make_layer(128, 256, 6, stride=2)
         self.conv5_x = self._make_layer(256, 512, 3, stride=2)
@@ -68,58 +70,80 @@ class ResNet34Encoder(nn.Module):
         x1 = self.conv1(x)
         x1 = self.bn1(x1)
         x1 = F.relu(x1)
-        
+
         # First block after maxpool
         x2 = self.maxpool(x1)
         x2 = self.conv2_x(x2)
-        
+
         # Remaining blocks
         x3 = self.conv3_x(x2)
         x4 = self.conv4_x(x3)
         x5 = self.conv5_x(x4)
-        
+
         # Return feature maps for skip connections
         return x1, x2, x3, x4, x5
 
 
 class ResNet34_UNet(nn.Module):
-    def __init__(self, n_channels=3, num_classes=2):
+    def __init__(self, n_channels=3, num_classes=1):
         super(ResNet34_UNet, self).__init__()
-        
+
         self.encoder = ResNet34Encoder()
-        
-        self.up1 = Up(512 + 256, 256)  # Combining x5 (512) and x4 (256)
-        self.up2 = Up(256 + 128, 128)  # Combining up1 output (256) and x3 (128)
-        self.up3 = Up(128 + 64, 64)    # Combining up2 output (128) and x2 (64)
-        self.up4 = Up(64 + 64, 32)     # Combining up3 output (64) and x1 (64)
-        
+
+        self.up1 = Up(512, 256)  # Combining x5 and x4
+        self.up2 = Up(256, 128)  # Combining up1 output and x3
+        self.up3 = Up(128, 64)   # Combining up2 output and x2
+        self.up4 = Up(64, 32)    # Combining up3 output and x1
+
+        # Add final upsampling to match original input size (from 286x286 to 572x572)
+        self.final_up = nn.Sequential(
+            nn.ConvTranspose2d(32, 32, kernel_size=2, stride=2),
+            nn.Conv2d(32, 32, kernel_size=3, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True)
+        )
+
         # Final convolution
         self.outc = OutConv(32, num_classes)
-    
+
     def forward(self, x):
+        # Store original input size
+        input_height, input_width = x.size()[2:]
+
+        # Encoder path
         x1, x2, x3, x4, x5 = self.encoder(x)
-        
+
+        # Decoder path with skip connections
         x = self.up1(x5, x4)
         x = self.up2(x, x3)
         x = self.up3(x, x2)
         x = self.up4(x, x1)
-        
+
+        # Final upsampling to match original input size
+        x = self.final_up(x)
+
+        # Optional: Ensure exact dimensions match by using interpolation if needed
+        if (x.size()[2] != input_height or x.size()[3] != input_width):
+            x = F.interpolate(x, size=(input_height, input_width),
+                              mode='bilinear', align_corners=True)
+
         # Final convolution
-        pred = self.outc(x)
-        
-        return pred
-    
+        x = self.outc(x)
+
+        return x
+
+
 # Example usage
 if __name__ == "__main__":
     # Create a sample input tensor: batch_size x channels x height x width
-    x = torch.randn((1, 1, 572, 572))
-    
+    x = torch.randn((1, 3, 572, 572))
+
     # Initialize the model
-    model = ResNet34_UNet(n_channels=1, n_classes=2)
-    
+    model = ResNet34_UNet(n_channels=3, num_classes=1)
+
     # Forward pass
     output = model(x)
-    
+
     # Print output shape
     print(f"Input shape: {x.shape}")
     print(f"Output shape: {output.shape}")
