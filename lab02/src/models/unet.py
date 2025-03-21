@@ -150,7 +150,7 @@ class UNet(nn.Module):
 # Example usage
 if __name__ == "__main__":
     # Create a sample input tensor: batch_size x channels x height x width
-    x = torch.randn((1, 1, 572, 572))
+    x = torch.randn((1, 3, 572, 572))
 
     # Initialize the model
     model = UNet(n_channels=3, n_classes=2)
