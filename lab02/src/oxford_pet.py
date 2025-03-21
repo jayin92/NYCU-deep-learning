@@ -130,5 +130,11 @@ def extract_archive(filepath):
 
 def load_dataset(data_path, mode):
     # implement the load dataset function here
+    dataset = SimpleOxfordPetDataset(root=data_path, mode=mode)
+    if not os.path.exists(os.path.join(data_path, 'images')) or not os.path.exists(os.path.join(data_path, 'annotations')):
+        print("Downloading dataset...")
+        dataset.download(data_path)
+    else:
+        print("Dataset already downloaded.")
 
-    assert False, "Not implemented yet!"
+    return dataset
