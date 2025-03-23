@@ -1,10 +1,11 @@
 # Implement your ResNet34_UNet model here
+import sys
+sys.path.append('.')
 from src.models.unet import Up, OutConv
 import torch.nn.functional as F
 import torch.nn as nn
 import torch
-import sys
-sys.path.append('.')
+
 
 
 class ResNetBasicBlock(nn.Module):
@@ -90,42 +91,37 @@ class ResNet34_UNet(nn.Module):
 
         self.encoder = ResNet34Encoder()
 
-        self.up1 = Up(512, 256)  # Combining x5 and x4
-        self.up2 = Up(256, 128)  # Combining up1 output and x3
-        self.up3 = Up(128, 64)   # Combining up2 output and x2
-        self.up4 = Up(64, 32)    # Combining up3 output and x1
-
-        # Add final upsampling to match original input size (from 286x286 to 572x572)
-        self.final_up = nn.Sequential(
-            nn.ConvTranspose2d(32, 32, kernel_size=2, stride=2),
-            nn.Conv2d(32, 32, kernel_size=3, padding=1),
-            nn.BatchNorm2d(32),
-            nn.ReLU(inplace=True)
+        self.bridge = nn.Sequential(
+            nn.Conv2d(512, 1024, kernel_size=3, padding=1),
+            nn.BatchNorm2d(1024),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=2, stride=2)
         )
 
+        self.up1 = Up(1024, 512)
+        self.up2 = Up(512, 256)
+        self.up3 = Up(256, 128)
+        self.up4 = Up(128, 64)
+        self.up5 = Up(64, 32)
+        self.final_up = nn.ConvTranspose2d(32, 32, kernel_size=2, stride=2)
         # Final convolution
         self.outc = OutConv(32, num_classes)
 
     def forward(self, x):
-        # Store original input size
-        input_height, input_width = x.size()[2:]
-
         # Encoder path
         x1, x2, x3, x4, x5 = self.encoder(x)
 
+        # Bridge
+        x = self.bridge(x5)
+
         # Decoder path with skip connections
-        x = self.up1(x5, x4)
-        x = self.up2(x, x3)
-        x = self.up3(x, x2)
-        x = self.up4(x, x1)
+        x = self.up1(x, x5)
+        x = self.up2(x, x4)
+        x = self.up3(x, x3)
+        x = self.up4(x, x2)
+        x = self.up5(x, x1)
 
-        # Final upsampling to match original input size
         x = self.final_up(x)
-
-        # Optional: Ensure exact dimensions match by using interpolation if needed
-        if (x.size()[2] != input_height or x.size()[3] != input_width):
-            x = F.interpolate(x, size=(input_height, input_width),
-                              mode='bilinear', align_corners=True)
 
         # Final convolution
         x = self.outc(x)
