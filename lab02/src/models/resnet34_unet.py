@@ -1,10 +1,7 @@
-# Implement your ResNet34_UNet model here
-import sys
-sys.path.append('.')
-from src.models.unet import Up, OutConv
 import torch.nn.functional as F
 import torch.nn as nn
 import torch
+from models.unet import Up, OutConv
 
 
 
@@ -86,7 +83,7 @@ class ResNet34Encoder(nn.Module):
 
 
 class ResNet34_UNet(nn.Module):
-    def __init__(self, n_channels=3, num_classes=1):
+    def __init__(self, n_channels=3, n_classes=1):
         super(ResNet34_UNet, self).__init__()
 
         self.encoder = ResNet34Encoder()
@@ -105,7 +102,7 @@ class ResNet34_UNet(nn.Module):
         self.up5 = Up(64, 32)
         self.final_up = nn.ConvTranspose2d(32, 32, kernel_size=2, stride=2)
         # Final convolution
-        self.outc = OutConv(32, num_classes)
+        self.outc = OutConv(32, n_classes)
 
     def forward(self, x):
         # Encoder path
@@ -135,7 +132,7 @@ if __name__ == "__main__":
     x = torch.randn((1, 3, 572, 572))
 
     # Initialize the model
-    model = ResNet34_UNet(n_channels=3, num_classes=1)
+    model = ResNet34_UNet(n_channels=3, n_classes=1)
 
     # Forward pass
     output = model(x)

@@ -2,6 +2,7 @@ import os
 import torch
 import shutil
 import numpy as np
+import torchvision.transforms as T
 
 from PIL import Image
 from tqdm import tqdm
@@ -91,9 +92,17 @@ class SimpleOxfordPetDataset(OxfordPetDataset):
         trimap = np.array(Image.fromarray(sample["trimap"]).resize((256, 256), Image.NEAREST))
 
         # convert to other format HWC -> CHW
-        sample["image"] = np.moveaxis(image, -1, 0)
+        # sample["image"] = np.moveaxis(image, -1, 0)
         sample["mask"] = np.expand_dims(mask, 0)
         sample["trimap"] = np.expand_dims(trimap, 0)
+
+           
+        image_transform = T.Compose([
+            T.ToTensor(),
+            T.Normalize(mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225]),
+        ])
+        sample["image"] = image_transform(image)
+
 
         return sample
 
@@ -130,11 +139,13 @@ def extract_archive(filepath):
 
 def load_dataset(data_path, mode):
     # implement the load dataset function here
-    dataset = SimpleOxfordPetDataset(root=data_path, mode=mode)
     if not os.path.exists(os.path.join(data_path, 'images')) or not os.path.exists(os.path.join(data_path, 'annotations')):
         print("Downloading dataset...")
-        dataset.download(data_path)
+        OxfordPetDataset.download(data_path)
     else:
         print("Dataset already downloaded.")
+
+    dataset = SimpleOxfordPetDataset(root=data_path, mode=mode)
+    
 
     return dataset

@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 lab02/data
+lab02/output
+wandb
 
 # C extensions
 *.so

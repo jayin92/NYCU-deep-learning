@@ -10,9 +10,9 @@ import torchvision.transforms as T
 from tqdm import tqdm
 from datetime import datetime
 
-from oxford_pet import OxfordPetDataset
+from oxford_pet import load_dataset
 from models.unet import UNet
-from models.resnet34_unet import ResNet34UNet
+from models.resnet34_unet import ResNet34_UNet
 from utils import dice_score
 
 def train(args):
@@ -39,22 +39,22 @@ def train(args):
 
     
     # Load the data
-    train_dataset = OxfordPetDataset(args.data_path, mode='train', transform=train_transforms)
+    train_dataset = load_dataset(args.data_path, mode='train')
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
     
-    val_dataset = OxfordPetDataset(args.data_path, mode='valid', transform=val_transforms)
+    val_dataset = load_dataset(args.data_path, mode='valid')
     val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
-    test_dataset = OxfordPetDataset(args.data_path, mode='test', transform=val_transforms)
+    test_dataset = load_dataset(args.data_path, mode='test')
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
     
     print(f"Dataset sizes - Train: {len(train_dataset)}, Val: {len(val_dataset)}, Test: {len(test_dataset)}")
     
     # Load the model
     if args.model == 'unet':
-        model = UNet(in_channels=3, n_classes=1)
+        model = UNet(n_channels=3, n_classes=1)
     elif args.model == 'resnet34_unet':
-        model = ResNet34UNet(in_channels=3, n_classes=1)
+        model = ResNet34_UNet(n_channels=3, n_classes=1)
     else:
         raise ValueError(f"Unknown model: {args.model}")
     
@@ -113,7 +113,8 @@ def train(args):
         train_loss = 0
         train_dice = 0
         
-        for i, batch in tqdm(enumerate(train_loader), total=len(train_loader), desc="Training"):
+        train_pbar = tqdm(enumerate(train_loader), total=len(train_loader), desc="Training")
+        for i, batch in train_pbar:
             images = batch['image'].to(device)
             masks = batch['mask'].to(device)
             
@@ -126,11 +127,13 @@ def train(args):
             loss.backward()
             optimizer.step()
             
-            
             # Update metrics
             batch_dice = dice_score(outputs, masks)
             train_loss += loss.item()
             train_dice += batch_dice
+            
+            # Update the progress bar directly with current loss and dice score
+            train_pbar.set_postfix(loss=f"{loss.item():.4f}", dice=f"{batch_dice:.4f}", lr=f"{optimizer.param_groups[0]['lr']:.4E}")
             
             # Update OneCycleLR scheduler if used
             if args.scheduler == 'onecycle':
@@ -270,11 +273,11 @@ def get_args():
     parser = argparse.ArgumentParser(description='Train the UNet on images and target masks')
     parser.add_argument('--data_path', type=str, help='path of the input data')
     parser.add_argument('--epochs', '-e', type=int, default=5, help='number of epochs')
-    parser.add_argument('--batch_size', '-b', type=int, default=1, help='batch size')
-    parser.add_argument('--learning-rate', '-lr', type=float, default=1e-5, help='learning rate')
+    parser.add_argument('--batch_size', '-b', type=int, default=32, help='batch size')
+    parser.add_argument('--learning-rate', '-lr', type=float, default=1e-2, help='learning rate')
     parser.add_argument('--weight_decay', '-wd', type=float, default=1e-4, help='weight decay')
     parser.add_argument('--num_workers', '-nw', type=int, default=4, help='number of workers for data loader')
-    parser.add_argument('--image_size', type=int, default=572, help='image size')
+    parser.add_argument('--image_size', type=int, default=256, help='image size')
     parser.add_argument('--model', type=str, default='unet', help='model to train', choices=['unet', 'resnet34_unet'])
     parser.add_argument('--scheduler', type=str, default='none', help='learning rate scheduler', choices=['none', 'plateau', 'cosine', 'onecycle'])
     parser.add_argument('--output_dir', type=str, default='output', help='Output directory')
@@ -282,7 +285,7 @@ def get_args():
     parser.add_argument('--use_wandb', action='store_true', help='use wandb for experiment tracking')
     parser.add_argument('--project', type=str, default='DLP2024-hw2', help='wandb project name')
 
-    return parser.parse_args()
+    return parser.parse_args() 
  
 if __name__ == "__main__":
     args = get_args()    
