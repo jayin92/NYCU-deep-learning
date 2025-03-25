@@ -1,7 +1,9 @@
+import sys
+sys.path.append('src/models')
 import torch.nn.functional as F
 import torch.nn as nn
 import torch
-from models.unet import Up, OutConv
+from unet import Up, OutConv
 
 
 
@@ -133,6 +135,10 @@ if __name__ == "__main__":
 
     # Initialize the model
     model = ResNet34_UNet(n_channels=3, n_classes=1)
+
+    # Print model parameter count
+    print(f"Model parameter count: {sum(p.numel() for p in model.parameters())}")
+    
 
     # Forward pass
     output = model(x)

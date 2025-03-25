@@ -153,7 +153,10 @@ if __name__ == "__main__":
     x = torch.randn((1, 3, 572, 572))
 
     # Initialize the model
-    model = UNet(n_channels=3, n_classes=2)
+    model = UNet(n_channels=3, n_classes=1)
+
+    print(f"Model parameter count: {sum(p.numel() for p in model.parameters())}")
+
 
     # Forward pass
     output = model(x)

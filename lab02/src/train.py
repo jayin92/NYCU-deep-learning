@@ -68,7 +68,7 @@ def train(args):
     
     # Load the learning rate scheduler
     if args.scheduler == 'plateau':
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=3, verbose=True)
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=3)
     elif args.scheduler == 'cosine':
         scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     elif args.scheduler == 'onecycle':
@@ -77,7 +77,7 @@ def train(args):
             max_lr=args.learning_rate,
             epochs=args.epochs,
             steps_per_epoch=len(train_loader),
-            pct_start=0.05,
+            pct_start=0.1,
             anneal_strategy='cos'
         )
     else:
@@ -274,8 +274,8 @@ def get_args():
     parser.add_argument('--data_path', type=str, help='path of the input data')
     parser.add_argument('--epochs', '-e', type=int, default=5, help='number of epochs')
     parser.add_argument('--batch_size', '-b', type=int, default=32, help='batch size')
-    parser.add_argument('--learning-rate', '-lr', type=float, default=1e-2, help='learning rate')
-    parser.add_argument('--weight_decay', '-wd', type=float, default=1e-4, help='weight decay')
+    parser.add_argument('--learning-rate', '-lr', type=float, default=1e-3, help='learning rate')
+    parser.add_argument('--weight_decay', '-wd', type=float, default=1e-2, help='weight decay')
     parser.add_argument('--num_workers', '-nw', type=int, default=4, help='number of workers for data loader')
     parser.add_argument('--image_size', type=int, default=256, help='image size')
     parser.add_argument('--model', type=str, default='unet', help='model to train', choices=['unet', 'resnet34_unet'])

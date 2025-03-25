@@ -2,7 +2,7 @@ import os
 import torch
 import shutil
 import numpy as np
-import torchvision.transforms as T
+import torchvision.transforms.v2 as T
 
 from PIL import Image
 from tqdm import tqdm
@@ -37,8 +37,8 @@ class OxfordPetDataset(torch.utils.data.Dataset):
         mask = self._preprocess_mask(trimap)
 
         sample = dict(image=image, mask=mask, trimap=trimap)
-        if self.transform is not None:
-            sample = self.transform(**sample)
+        # if self.transform is not None:
+        #     sample = self.transform(**sample)
 
         return sample
 
@@ -82,6 +82,21 @@ class OxfordPetDataset(torch.utils.data.Dataset):
 
 
 class SimpleOxfordPetDataset(OxfordPetDataset):
+    def __init__(self, root, mode="train"):
+        super().__init__(root, mode)
+        train_transform = T.Compose([
+            T.ToImage(),
+            T.RandomHorizontalFlip(p=0.5),
+            T.RandomVerticalFlip(p=0.5),
+            T.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+            T.ToDtype(torch.float32, scale=True),
+        ])
+        val_transorm = T.Compose([
+            T.ToImage(),
+            T.ToDtype(torch.float32, scale=True),
+        ])
+        self.transform = train_transform if mode == 'train' else val_transorm
+        self.normalize = T.Compose([T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
     def __getitem__(self, *args, **kwargs):
 
         sample = super().__getitem__(*args, **kwargs)
@@ -93,16 +108,11 @@ class SimpleOxfordPetDataset(OxfordPetDataset):
 
         # convert to other format HWC -> CHW
         # sample["image"] = np.moveaxis(image, -1, 0)
-        sample["mask"] = np.expand_dims(mask, 0)
+        # sample["mask"] = np.expand_dims(mask, 0)
         sample["trimap"] = np.expand_dims(trimap, 0)
-
-           
-        image_transform = T.Compose([
-            T.ToTensor(),
-            T.Normalize(mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225]),
-        ])
-        sample["image"] = image_transform(image)
-
+       
+        sample["image"], sample["mask"] = self.transform(image, mask)
+        sample["image"] = self.normalize(sample["image"])
 
         return sample
 
