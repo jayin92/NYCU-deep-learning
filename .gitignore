@@ -2,8 +2,10 @@
 __pycache__/
 *.py[cod]
 *$py.class
-lab02/data
+lab02/dataset/oxford-iiit-pet/*
+!lab02/dataset/oxford-iiit-pet/.gitkeep
 lab02/output
+lab02/predictions*
 wandb
 
 # C extensions
