@@ -1,4 +1,4 @@
-\documentclass[twocolumn]{extarticle}
+\documentclass[twocolumn,a4paper]{article}
 \usepackage{fontspec}   %加這個就可以設定字體
 \usepackage{xeCJK}       %讓中英文字體分開設置
 \usepackage{indentfirst}
@@ -19,7 +19,7 @@
 \usepackage{subcaption}
 \usepackage{pifont}
 \usepackage{amssymb}
-\usepackage{titling}
+
 
 \usepackage{pdftexcmds}
 \usepackage{catchfile}
@@ -63,12 +63,13 @@ heightrounded, % to avoid spurious underfull messages
 
 
 
-\title{Deep Learning Lab 1 - Backpropagation}
+\title{Deep Learning Lab 2 - Binary Semantic Segmentation}
 \author{110550088 李杰穎}
 \date{\today}
 
 
 \setCJKmainfont{Noto Serif TC}
+
 
 
 \ifwindows
@@ -81,632 +82,1185 @@ heightrounded, % to avoid spurious underfull messages
 \newcommand*{\dif}{\mathop{}\!\mathrm{d}}
 
 
-\setlength{\parindent}{0em}
-\setlength{\parskip}{2em}
-\renewcommand{\baselinestretch}{1.25}
-\setlength{\droptitle}{-7.5em}   % This is your set screw
-\setlength{\columnsep}{2em}
-
-\usepackage[moderate]{savetrees}
+%\setlength{\parindent}{0em}
+%\setlength{\parskip}{2em}
+%\renewcommand{\baselinestretch}{1.25}
+%\setlength{\droptitle}{-7.5em}   % This is your set screw
+%\setlength{\columnsep}{2em}
 
 \begin{document}
 
 \maketitle
 
-\section{Introduction}
-In this lab, I implement a simple multi-layer perceptron (MLP) with two hidden layers. Neural networks like MLPs form the foundation of many modern deep learning approaches and provide insights into how complex patterns can be learned from data. This implementation demonstrates the fundamental principles that underpin more sophisticated architectures used in contemporary deep learning systems.
-
-The MLP architecture is applied to classify both linearly-separable data and the classical XOR problem. The XOR problem is particularly significant in the history of neural networks because it cannot be solved by a single-layer perceptron, making it a canonical test case for evaluating the representational power of neural networks with hidden layers. By successfully implementing backpropagation and training this network on the XOR problem, we demonstrate the essential capability of multi-layer architectures to learn complex non-linear relationships.
-
-To develop a complete end-to-end learning system, I implement several core components: Mean Squared Error (MSE) loss function, a stochastic gradient descent optimizer, Sigmoid and ReLU activation functions, and the backpropagation algorithm for each component. This implementation provides hands-on experience with the fundamental building blocks that constitute modern deep learning frameworks and offers valuable insights into their inner workings.
-
 \section{Implementation Details}
-\subsection{Code structure}
-The implementation is organized into modular components, with each functionality encapsulated in a separate file within the \texttt{src/} directory:
+
+\subsection{Code Structure}
+The implementation is organized into modular components, with each functionality encapsulated in separate files within the \texttt{src/} directory, following the required project structure:
+
 \begin{itemize}
-\item \texttt{data.py}: Contains data generation utilities, including the provided \texttt{generate\_linear} and \texttt{generate\_XOR\_easy} functions.
-\item \texttt{model.py}: Defines all architectural components required for constructing an MLP.
-\item \texttt{loss.py}: Implements the MSE loss function.
-\item \texttt{optimizer.py}: Implements the SGD optimizer.
-\item \texttt{utils.py}: Contains visualization and plotting utilities.
-\item \texttt{train.py}: Implements the main training loop and serves as the entry point for the implementation.
+    \item \texttt{models/}: Contains the neural network architectures.
+        \begin{itemize}
+            \item \texttt{unet.py}: Implements the standard UNet architecture.
+            \item \texttt{resnet.py}: Implements the ResNet34 encoder with UNet decoder.
+        \end{itemize}
+    \item \texttt{oxford\_pet.py}: Handles dataset loading, preprocessing, and augmentation.
+    \item \texttt{train.py}: Contains the training loop and related utilities.
+    \item \texttt{evaluate.py}: Implements validation and evaluation metrics.
+    \item \texttt{inference.py}: Handles model inference on unseen images.
+    \item \texttt{utils.py}: Contains utility functions like Dice score calculation.
 \end{itemize}
 
-All neural network components inherit from an abstract \texttt{NNModule} parent class. This base class defines three essential methods that constitute the foundation of neural network operations:
-\begin{enumerate}
-\item \texttt{forward}: Implements the forward pass where inputs are propagated through the network to produce outputs. This method defines the computational behavior of each network component during inference.
-\item \texttt{backward}: Handles the backward pass (gradient backpropagation), where gradients are computed with respect to parameters and inputs. This method enables the network to learn by calculating the gradients needed for parameter updates.
-\item \texttt{parameters}: Provides access to the learnable parameters and their corresponding gradients that are necessary during optimization. This method allows the optimizer to efficiently update the network's parameters based on computed gradients.
-\end{enumerate}
+\subsection{Network Architectures}
+For this lab, I implemented two encoder-decoder architectures for binary semantic segmentation: a standard UNet and a ResNet34-UNet hybrid.
 
-This design establishes a consistent interface for all neural network components, enabling modular design and seamless integration of different layers and functions within the network architecture—a pattern similar to that found in modern deep learning frameworks like PyTorch and TensorFlow.
+\subsubsection{UNet Architecture}
+The UNet architecture follows the original design from Ronneberger et al., consisting of a contracting path (encoder) and an expansive path (decoder) with skip connections between corresponding layers.
 
-\subsection{Sigmoid function}
-The Sigmoid function is formally defined as:
-\begin{equation}
-\text{Sigmoid}(x) = \frac{1}{1+e^{-x}} \, .
-\end{equation}
-We derive its derivative with respect to its input $x$. Denoting $\text{Sigmoid}(x)$ as $\sigma(x)$:
-\begin{align}
-\frac{d}{dx} \sigma(x) &= \frac{d}{dx} \left[\frac{1}{1+e^{-x}}\right]  \\
-&= \frac{e^{-x}}{(1+e^{-x})^2} \\
-&= \frac{1}{1+e^{-x}} \frac{e^{-x}}{1+e^{-x}} \\
-&= \sigma(x) \left(\frac{1+e^{-x}}{1+e^{-x}} - \frac{1}{1+e^{-x}}\right) \\
-&= \sigma(x) \left(1 - \sigma(x)\right) \, .
-\end{align}
+\paragraph{Contracting Path (Encoder):}
+The encoder consists of repeated blocks of two 3×3 convolutions followed by a ReLU activation and a 2×2 max pooling operation with stride 2. Each downsampling step doubles the number of feature channels.
 
-A key observation is that the derivative of the Sigmoid function can be expressed solely in terms of its output $\sigma(x)$. This elegant property simplifies implementation and computational efficiency, as we can reuse the forward pass result when computing gradients.
-
-\begin{code}
-\captionof{listing}{\textbf{Implementation of the Sigmoid activation function.}}
-\label{code: sigmoid}
-\begin{minted}
-class Sigmoid(NNModule):
-    def __init__(self):
-        self.output = None
-
-    def forward(self, x):
-        self.output = 1 / (1 + np.exp(-x))
-        return self.output
-
-    def backward(self, grad):
-        return grad * self.output * (1 - self.output)
-
-    def parameters(self):
-        return []  # Activation functions don't have trainable parameters
-\end{minted}
-\end{code}
-
-\subsection{Linear layer}
-
-The linear layer is the fundamental building block of MLPs. It performs an affine transformation on the input data using weight matrix $W \in \mathbb{R}^{m \times n}$ and bias vector $b \in \mathbb{R}^m$, where $n$ and $m$ represent the number of input and output features, respectively. Formally, the linear transformation is defined as:
-
-\begin{equation}
-\text{Linear}(x) = xW^T + b \,.
-\end{equation}
-
-The weight matrix $W$ is defined with dimensions $m \times n$ to facilitate more efficient matrix operations during both forward and backward passes, particularly when implementing backpropagation.
-
-\begin{code}
-\captionof{listing}{\textbf{Implementation of the Linear layer.}}
-\label{code: linear}
-\begin{minted}
-class Linear(NNModule):
-    def __init__(self, in_features, out_features, bias=True):
-        self.in_features = in_features
-        self.out_features = out_features
-
-        # Convert weights and biases to Parameter objects
-        self.weight = Parameter(np.random.randn(out_features, in_features))
-        self.bias = Parameter(np.random.randn(out_features)) if bias else None
-
-    def forward(self, x):
-        self.x = x
-        if self.bias is not None:
-            return np.dot(x, self.weight.data.T) + self.bias.data
-        return np.dot(x, self.weight.data.T)
-\end{minted}
-\end{code}
-
-\subsection{Neural network architecture}
-For this implementation, I designed a simple MLP with two hidden layers, each containing 16 neurons. The input layer has 2 neurons, corresponding to the x and y coordinates of the data points. The output layer consists of a single neuron that outputs the probability of an input coordinate belonging to the positive class. Bias terms are included in each layer to increase the model's expressivity.
-
-For activation functions, ReLU is applied after the first hidden layer to introduce non-linearity, while Sigmoid is used after the second hidden layer to constrain the output to the [0,1] range, representing a probability value.
-
-The complete MLP architecture is illustrated in Figure \ref{fig:mlp}.
-
-\begin{figure}[H]
+\begin{figure}[h]
 \centering
-\includegraphics[width=0.95\linewidth]{figures/mlp}
-\caption{\textbf{The MLP architecture with two hidden layers.} The network processes 2D input through two hidden layers with 16 neurons each, using ReLU and Sigmoid activations, culminating in a single output neuron for binary classification.}
-\label{fig:mlp}
+% Insert UNet architecture diagram here
+\caption{\textbf{UNet architecture.} The network consists of a contracting path (left) and an expansive path (right). Skip connections connect corresponding layers between the encoder and decoder paths.}
+\label{fig:unet}
 \end{figure}
 
-Given the components described above, we can now construct the complete MLP and define its forward propagation mechanism.
+\paragraph{Double Convolution Block:}
+The basic building block of the UNet is the double convolution, implemented as:
 
 \begin{code}
-\captionof{listing}{\textbf{Implementation of the MLP architecture.}}
-\label{code: mlp}
+\captionof{listing}{\textbf{Implementation of the Double Convolution block.}}
+\label{code:double_conv}
 \begin{minted}
-class MLP(NNModule):
-    def __init__(self, in_features, hidden_size, out_features, activations=[ReLU(), Sigmoid()]):
-        self.linear1 = Linear(in_features, hidden_size)
-        self.linear2 = Linear(hidden_size, out_features)
-        self.activation1, self.activation2 = activations
+class DoubleConv(nn.Module):
+    """
+    Double Convolution block: (conv -> BN -> ReLU) * 2
+    """
+    def __init__(self, in_channels, out_channels, mid_channels=None):
+        super().__init__()
+        if not mid_channels:
+            mid_channels = out_channels
+
+        self.double_conv = nn.Sequential(
+            nn.Conv2d(in_channels, mid_channels,
+                      kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(mid_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(mid_channels, out_channels,
+                      kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
 
     def forward(self, x):
-        x = self.linear1.forward(x)
-        x = self.activation1.forward(x)
-        x = self.linear2.forward(x)
-        x = self.activation2.forward(x)
-        return x
-
-    def backward(self, grad):
-        grad = self.activation2.backward(grad)
-        grad = self.linear2.backward(grad)
-        grad = self.activation1.backward(grad)
-        grad = self.linear1.backward(grad)
-        return grad
-
-    def parameters(self):
-        params = []
-        params.extend(self.linear1.parameters())
-        params.extend(self.linear2.parameters())
-        return params
+        return self.double_conv(x)
 \end{minted}
 \end{code}
 
-\subsection{Backpropagation}
-
-The backpropagation algorithm is implemented through the \texttt{backward} method in each module, which computes gradients for all parameters and returns the gradient with respect to the input. These gradients are stored in the \texttt{.grad} attribute of each parameter, making them accessible to the optimizer for parameter updates.
-
-The design of the \texttt{Parameter} class is central to this implementation. Each \texttt{Parameter} object contains two attributes: \texttt{data}, which stores the actual parameter values (e.g., weights), and \texttt{grad}, which stores the computed gradients. This separation facilitates the optimization process by providing a clear interface for updating parameters based on their gradients.
-
-While the \texttt{backward} methods for activation functions were derived earlier, let us focus on deriving the backward pass for the \texttt{Linear} layer.
-
-For a linear layer with forward propagation defined as:
-\begin{equation}
-y = x W^T + b \, ,
-\end{equation}
-where $y\in\mathbb{R}^n$ is the output, $x\in \mathbb{R}^m$ is the input, $W \in \mathbb{R}^{n \times m}$ is the weight matrix, and $b \in \mathbb{R}^n$ is the bias vector, we need to compute the partial derivatives of the loss $L$ with respect to $W$, $b$, and input $x$:
-
-\begin{align}
-\frac{\partial L}{\partial W} &= \frac{\partial L}{\partial y} \frac{\partial y}{\partial W} =  \left(\frac{\partial L}{\partial y}\right)^T x \\
-\frac{\partial L}{\partial b} &= \frac{\partial L}{\partial y} \frac{\partial y}{\partial b} = \sum_i \left(\frac{\partial L}{\partial y}\right)_i \\
-\frac{\partial L}{\partial x} &= \frac{\partial L}{\partial y} \frac{\partial y}{\partial x} = \frac{\partial L}{\partial y} W \\
-\end{align}
-
-The backward method of the MLP orchestrates the entire backpropagation process by calling the backward methods of its components in reverse order, effectively implementing the chain rule of calculus for gradient propagation through the network.
-
-\subsection{Optimizer and Training Loop}
-
-The optimizer implements the parameter update strategy based on computed gradients. For this implementation, I use a simple Stochastic Gradient Descent (SGD) optimizer, which updates parameters in the direction of the negative gradient scaled by the learning rate:
+\paragraph{Down-sampling Block:}
+Each down-sampling step in the encoder consists of a max pooling operation followed by a double convolution:
 
 \begin{code}
-\captionof{listing}{\textbf{Implementation of the SGD optimizer.}}
+\captionof{listing}{\textbf{Implementation of the Down-sampling block.}}
+\label{code:down}
+\begin{minted}
+class Down(nn.Module):
+    """
+    Downsampling block: maxpool -> double conv
+    """
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.maxpool_conv = nn.Sequential(
+            nn.MaxPool2d(2),
+            DoubleConv(in_channels, out_channels)
+        )
+
+    def forward(self, x):
+        return self.maxpool_conv(x)
+\end{minted}
+\end{code}
+
+\paragraph{Expansive Path (Decoder):}
+The decoder consists of up-sampling operations followed by double convolutions. Each up-sampling step halves the number of feature channels. Skip connections from the encoder are concatenated with the corresponding decoder features to provide localization information.
+
+\begin{code}
+\captionof{listing}{\textbf{Implementation of the Up-sampling block.}}
+\label{code:up}
+\begin{minted}
+class Up(nn.Module):
+    """
+    Upsampling block: upconv -> double conv
+    """
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+       
+        self.up = nn.ConvTranspose2d(
+            in_channels, in_channels // 2, kernel_size=2, stride=2)
+        self.conv = DoubleConv(in_channels, out_channels)
+
+    def forward(self, x1, x2):
+        x1 = self.up(x1)
+
+        # Adjust dimensions if there's a mismatch (due to odd dimensions)
+        diffY = x2.size()[2] - x1.size()[2]
+        diffX = x2.size()[3] - x1.size()[3]
+
+        x1 = F.pad(x1, [diffX // 2, diffX - diffX // 2,
+                        diffY // 2, diffY - diffY // 2])
+
+        # Concatenate along the channel dimension
+        x = torch.cat([x2, x1], dim=1)
+        return self.conv(x)
+\end{minted}
+\end{code}
+
+\paragraph{Final Output Layer:}
+The final layer uses a 1×1 convolution to map the feature vector to the desired number of classes (1 for binary segmentation):
+
+\begin{code}
+\captionof{listing}{\textbf{Implementation of the Output Convolution block.}}
+\label{code:outconv}
+\begin{minted}
+class OutConv(nn.Module):
+    """
+    Output convolution block
+    """
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=1)
+
+    def forward(self, x):
+        return self.conv(x)
+\end{minted}
+\end{code}
+
+\paragraph{Complete UNet Architecture:}
+The complete UNet architecture combines these components:
+
+\begin{code}
+\captionof{listing}{\textbf{Implementation of the complete UNet architecture.}}
+\label{code:unet}
+\begin{minted}
+class UNet(nn.Module):
+    """
+    Full UNet architecture
+    """
+    def __init__(self, n_channels=1, n_classes=2):
+        """
+        Args:
+            n_channels: Number of input channels (e.g., 1 for grayscale, 3 for RGB)
+            n_classes: Number of output classes (e.g., 2 for binary segmentation)
+        """
+        super(UNet, self).__init__()
+        self.n_channels = n_channels
+        self.n_classes = n_classes
+
+        # Initial double convolution
+        self.inc = DoubleConv(n_channels, 64)
+
+        # Contracting path (encoder)
+        self.down1 = Down(64, 128)
+        self.down2 = Down(128, 256)
+        self.down3 = Down(256, 512)
+        self.down4 = Down(512, 1024)
+
+        # Expansive path (decoder)
+        self.up1 = Up(1024, 512)
+        self.up2 = Up(512, 256)
+        self.up3 = Up(256, 128)
+        self.up4 = Up(128, 64)
+
+        # Final convolution
+        self.outc = OutConv(64, n_classes)
+
+    def forward(self, x):
+        # Contracting path
+        x1 = self.inc(x)
+        x2 = self.down1(x1)
+        x3 = self.down2(x2)
+        x4 = self.down3(x3)
+        x5 = self.down4(x4)
+
+        # Expansive path with skip connections
+        x = self.up1(x5, x4)
+        x = self.up2(x, x3)
+        x = self.up3(x, x2)
+        x = self.up4(x, x1)
+
+        # Final convolution
+        pred = self.outc(x)
+        
+        return pred
+\end{minted}
+\end{code}
+
+The architecture has 5 levels with an initial channel count of 64, which doubles at each down-sampling step until 1024 channels at the bottleneck. The total parameter count for the UNet model (with 3 input channels and 1 output channel) is approximately 31.04 million.
+
+\subsubsection{ResNet34-UNet Architecture}
+The ResNet34-UNet hybrid architecture combines a ResNet34 backbone as the encoder with a UNet-style decoder path. This architecture leverages the power of residual learning for feature extraction while maintaining the precise localization capabilities of UNet. 
+
+For the implementation, I reference a public GitHub repository\footnote{\url{https://github.com/GohVh/resnet34-unet/blob/main/model.py}}.
+
+\paragraph{ResNet34 Encoder:}
+The encoder is based on ResNet34, which consists of residual blocks with identity mappings. Each residual block contains two 3×3 convolutional layers with batch normalization and ReLU activations:
+
+\begin{code}
+\captionof{listing}{\textbf{Implementation of the ResNet34 Basic Block.}}
+\label{code:resnet_block}
+\begin{minted}
+class ResNetBasicBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, stride=1):
+        super(ResNetBasicBlock, self).__init__()
+        self.conv1 = nn.Conv2d(
+            in_channels, out_channels, kernel_size=3, stride=stride, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.relu = nn.ReLU(inplace=True)
+        self.conv2 = nn.Conv2d(
+            out_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+        self.downsample = nn.Sequential()
+        if stride != 1 or in_channels != out_channels:
+            self.downsample = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels,
+                          kernel_size=1, stride=stride, bias=False),
+                nn.BatchNorm2d(out_channels)
+            )
+
+    def forward(self, x):
+        identity = x
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+
+        # Apply downsample to identity if needed
+        identity = self.downsample(identity)
+
+        # Add residual connection
+        out = out + identity
+        out = self.relu(out)
+
+        return out
+\end{minted}
+\end{code}
+
+The complete ResNet34 encoder is implemented as follows\footnote{For ResNet-34 implementation, I also referenced \url{https://ithelp.ithome.com.tw/articles/10333931}}:
+
+\begin{code}
+\captionof{listing}{\textbf{Implementation of the ResNet34 Encoder.}}
+\label{code:resnet_encoder}
+\begin{minted}
+class ResNet34Encoder(nn.Module):
+    def __init__(self):
+        super(ResNet34Encoder, self).__init__()
+        # Define the ResNet34 encoder
+        self.conv1 = nn.Conv2d(3, 32, kernel_size=7,
+                               stride=2, padding=3, bias=False)
+        self.bn1 = nn.BatchNorm2d(32)
+        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        self.conv2_x = self._make_layer(32, 64, 3)
+        self.conv3_x = self._make_layer(64, 128, 4, stride=2)
+        self.conv4_x = self._make_layer(128, 256, 6, stride=2)
+        self.conv5_x = self._make_layer(256, 512, 3, stride=2)
+
+    def _make_layer(self, in_channels, out_channels, num_blocks, stride=1):
+        layers = []
+        for _ in range(num_blocks):
+            layers.append(ResNetBasicBlock(in_channels, out_channels, stride))
+            in_channels = out_channels
+            stride = 1
+        return nn.Sequential(*layers)
+
+    def forward(self, x):
+        x1 = self.conv1(x)
+        x1 = self.bn1(x1)
+        x1 = F.relu(x1)
+
+        # First block after maxpool
+        x2 = self.maxpool(x1)
+        x2 = self.conv2_x(x2)
+
+        # Remaining blocks
+        x3 = self.conv3_x(x2)
+        x4 = self.conv4_x(x3)
+        x5 = self.conv5_x(x4)
+
+        # Return feature maps for skip connections
+        return x1, x2, x3, x4, x5
+\end{minted}
+\end{code}
+
+\paragraph{Complete ResNet34-UNet Architecture:}
+The complete ResNet34-UNet combines the ResNet34 encoder with a UNet-style decoder:
+
+\begin{code}
+\captionof{listing}{\textbf{Implementation of the ResNet34-UNet architecture.}}
+\label{code:resnet_unet}
+\begin{minted}
+class ResNet34_UNet(nn.Module):
+    def __init__(self, n_channels=3, n_classes=1):
+        super(ResNet34_UNet, self).__init__()
+
+        self.encoder = ResNet34Encoder()
+
+        self.bridge = nn.Sequential(
+            nn.Conv2d(512, 1024, kernel_size=3, padding=1),
+            nn.BatchNorm2d(1024),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=2, stride=2)
+        )
+
+        self.up1 = Up(1024, 512)
+        self.up2 = Up(512, 256)
+        self.up3 = Up(256, 128)
+        self.up4 = Up(128, 64)
+        self.up5 = Up(64, 32)
+        self.final_up = nn.ConvTranspose2d(32, 32, kernel_size=2, stride=2)
+        # Final convolution
+        self.outc = OutConv(32, n_classes)
+
+    def forward(self, x):
+        # Encoder path
+        x1, x2, x3, x4, x5 = self.encoder(x)
+
+        # Bridge
+        x = self.bridge(x5)
+
+        # Decoder path with skip connections
+        x = self.up1(x, x5)
+        x = self.up2(x, x4)
+        x = self.up3(x, x3)
+        x = self.up4(x, x2)
+        x = self.up5(x, x1)
+
+        x = self.final_up(x)
+
+        # Final convolution
+        x = self.outc(x)
+
+        return x
+\end{minted}
+\end{code}
+
+The ResNet34-UNet architecture benefits from the residual connections in the encoder, which help with gradient flow during backpropagation and enable deeper network training. The total parameter count for the ResNet34-UNet model is approximately 38.22M.
+
+
+
+\subsection{Loss Function}
+For the binary semantic segmentation task, I chose the Binary Cross-Entropy with Logits Loss (BCEWithLogitsLoss) as the primary loss function:
+
+BCEWithLogitsLoss combines a Sigmoid activation and Binary Cross-Entropy loss in a single function, providing better numerical stability. The loss function calculates the pixel-wise binary cross-entropy between the predicted logits and target masks.
+
+The binary cross-entropy loss for pixel $i$ is defined as:
+
+\begin{equation}
+-[y_i \cdot \log(\sigma(x_i)) + (1 - y_i) \cdot \log(1 - \sigma(x_i))]
+\end{equation}
+
+where $\sigma(x_i)$ is the sigmoid function applied to the predicted logit $x_i$, and $y_i$ is the ground truth label (0 or 1).
+
+\subsection{Evaluation Metric}
+For evaluating the segmentation performance, I implemented the Dice score, which is a widely used metric for semantic segmentation tasks:
+
+\begin{code}
+\captionof{listing}{\textbf{Implementation of the Dice Score metric.}}
+\label{code:dice}
+\begin{minted}
+def dice_score(pred_mask, gt_mask):
+    # Ensure binary masks with proper thresholding (detach from computation graph if needed)
+    with torch.no_grad():
+        # apply sigmoid the the prediction mask
+        pred_mask = (torch.sigmoid(pred_mask) > 0.5).float().flatten()
+        gt_mask = (gt_mask > 0.5).float().flatten()
+        
+        intersection = torch.sum(pred_mask * gt_mask)
+        union = torch.sum(pred_mask) + torch.sum(gt_mask)
+        
+        dice = (2.0 * intersection) / (union + 1e-8)  # add a small epsilon to avoid division by zero
+        
+        return dice.item()
+\end{minted}
+\end{code}
+
+The Dice score measures the overlap between the predicted segmentation mask and the ground truth mask. It is calculated as twice the area of intersection divided by the sum of the areas of both masks:
+
+\begin{equation}
+\text{Dice} = \frac{2 \times |X \cap Y|}{|X| + |Y|}
+\end{equation}
+
+where $X$ is the predicted mask and $Y$ is the ground truth mask. The Dice score ranges from 0 (no overlap) to 1 (perfect overlap).
+
+\subsection{Training Procedure}
+The training procedure is implemented in the \texttt{train.py} file and consists of the following key components:
+
+\paragraph{Optimizer:}
+I used the AdamW optimizer, which combines the benefits of Adam with decoupled weight decay regularization:
+
+\begin{code}
+\captionof{listing}{\textbf{Optimizer implementation.}}
 \label{code:optimizer}
 \begin{minted}
-class Optimizer:
-    def __init__(self, parameters, lr=0.01):
-        self.parameters = parameters
-        self.lr = lr
-
-    def step(self):
-        for param in self.parameters:
-            param.data -= self.lr * param.grad
-            param.grad = np.zeros_like(param.grad)
-
-    def zero_grad(self):
-        for param in self.parameters:
-            param.grad = np.zeros_like(param.grad)
-
-
-class SGD(Optimizer):
-    def __init__(self, parameters, lr=0.01):
-        super(SGD, self).__init__(parameters, lr)
-
-    def step(self):
-        for param in self.parameters:
-            param.data -= self.lr * param.grad
-            param.grad = np.zeros_like(param.grad)
+optimizer = optim.AdamW(model.parameters(), 
+                         lr=args.learning_rate, 
+                         weight_decay=args.weight_decay)
 \end{minted}
 \end{code}
 
-The optimizer provides two key methods:
-\begin{enumerate}
-    \item \texttt{zero\_grad()}: Resets all parameter gradients to zero before computing new gradients for the current iteration.
-    \item \texttt{step()}: Updates all parameters by subtracting the gradient scaled by the learning rate.
-\end{enumerate}
-
-The training process is coordinated by the training loop, which orchestrates the forward pass, loss computation, backpropagation, and parameter updates for each training iteration:
+\paragraph{Learning Rate Scheduler:}
+To improve convergence, I implemented several learning rate scheduling options:
 
 \begin{code}
-\captionof{listing}{\textbf{Implementation of the training loop.}}
-\label{code:train}
+\captionof{listing}{\textbf{Learning rate scheduler implementations.}}
+\label{code:scheduler}
 \begin{minted}
-def train(model, loss_fn, optimizer, x, y, epochs=1000):
-    losses = []
-    start_time = time.time()
-    for epoch in range(epochs):
+if args.scheduler == 'plateau':
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', patience=3)
+elif args.scheduler == 'cosine':
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=args.epochs)
+elif args.scheduler == 'onecycle':
+    scheduler = optim.lr_scheduler.OneCycleLR(
+        optimizer, 
+        max_lr=args.learning_rate,
+        epochs=args.epochs,
+        steps_per_epoch=len(train_loader),
+        pct_start=0.1,
+        anneal_strategy='cos'
+    )
+else:
+    scheduler = None
+\end{minted}
+\end{code}
+
+These schedulers help in dynamically adjusting the learning rate during training:
+\begin{itemize}
+    \item \textbf{ReduceLROnPlateau}: Reduces the learning rate when the validation loss plateaus.
+    \item \textbf{CosineAnnealingLR}: Gradually reduces the learning rate following a cosine curve.
+    \item \textbf{OneCycleLR}: Implements the one-cycle policy that increases the learning rate to a maximum value and then decreases it.
+\end{itemize}
+
+I will discuss the performance of cosine annealing and one cycle learning rate scheduler in Sec. \ref{sec:exp}.
+
+\paragraph{Training Loop:}
+The main training loop consists of:
+\begin{itemize}
+    \item Forward pass through the model to generate predictions.
+    \item Loss calculation using BCEWithLogitsLoss.
+    \item Backward pass to compute gradients.
+    \item Parameter updates using the AdamW optimizer.
+    \item Validation phase after each epoch to evaluate model performance.
+    \item Learning rate adjustment using the chosen scheduler.
+    \item Checkpointing to save the best model based on validation Dice score.
+\end{itemize}
+
+\begin{code}
+\captionof{listing}{\textbf{Training loop implementation.}}
+\label{code:train_loop}
+\begin{minted}
+# Training loop
+for epoch in range(start_epoch, args.epochs):
+    print(f"\nEpoch {epoch+1}/{args.epochs}")
+    
+    # Training phase
+    model.train()
+    train_loss = 0
+    train_dice = 0
+    
+    train_pbar = tqdm(enumerate(train_loader), total=len(train_loader), desc="Training")
+    for i, batch in train_pbar:
+        images = batch['image'].to(device)
+        masks = batch['mask'].to(device)
+        
+        # Forward pass
         optimizer.zero_grad()
-        output = model.forward(x)
-        loss = loss_fn.forward(output, y)
-        grad = loss_fn.backward()
-        model.backward(grad)
+        outputs = model(images)
+        loss = criterion(outputs, masks)
+        
+        # Backward pass and optimize
+        loss.backward()
         optimizer.step()
-        losses.append(loss)
-        if epoch % 100 == 0:
-            print(f'Epoch {epoch}, Loss {loss}')
-    print(f'Epoch {epochs}, Loss {loss}')
-    print(f'Training finished, elapsed {time.time() - start_time}s')
-    # show loss
-    if args.output_path:
-        plot_loss(
-            losses, args, f'{args.output_path}/loss_{args.data}_lr{str(args.lr).replace(".", "")}_n{args.num_neurons}_e{args.epochs}{"_no_acti" if args.no_activation else ""}.png')
-    else:
-        plot_loss(losses, args)
+        
+        # Update metrics
+        batch_dice = dice_score(outputs, masks)
+        train_loss += loss.item()
+        train_dice += batch_dice
+        
+        # Update the progress bar
+        train_pbar.set_postfix(loss=f"{loss.item():.4f}", 
+                               dice=f"{batch_dice:.4f}", 
+                               lr=f"{optimizer.param_groups[0]['lr']:.4E}")
+        
+        # Update OneCycleLR scheduler if used
+        if args.scheduler == 'onecycle':
+            scheduler.step()
+    
+    # Calculate average metrics
+    train_loss /= len(train_loader)
+    train_dice /= len(train_loader)
+    
+    # Validation phase
+    model.eval()
+    val_loss = 0
+    val_dice = 0
+    
+    with torch.no_grad():
+        for batch in tqdm(val_loader, total=len(val_loader), desc="Validation"):
+            images = batch['image'].to(device)
+            masks = batch['mask'].to(device)
+            
+            outputs = model(images)
+            loss = criterion(outputs, masks)
+            
+            val_loss += loss.item()
+            val_dice += dice_score(outputs, masks)
+    
+    val_loss /= len(val_loader)
+    val_dice /= len(val_loader)
+    
+    # Update ReduceLROnPlateau or CosineAnnealingLR scheduler
+    if args.scheduler == 'plateau':
+        scheduler.step(val_loss)
+    elif args.scheduler == 'cosine':
+        scheduler.step()
+    
+    # Print progress
+    print(f"Train Loss: {train_loss:.4f}, Train Dice: {train_dice:.4f}")
+    print(f"Val Loss: {val_loss:.4f}, Val Dice: {val_dice:.4f}")
+    print(f"Learning Rate: {optimizer.param_groups[0]['lr']:.8f}")
+    
+    # Save checkpoints and track best model
+    if val_dice > best_val_dice:
+        best_val_dice = val_dice
+        torch.save({
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'val_dice': val_dice,
+            'epoch': epoch
+        }, os.path.join(args.save_dir, 'best_model.pth'))
 \end{minted}
 \end{code}
 
-Each training iteration follows this sequence:
-\begin{enumerate}
-    \item \textbf{Gradient reset}: The optimizer's \texttt{zero\_grad()} method clears any existing gradients.
-    \item \textbf{Forward pass}: The model processes the input data and generates predictions.
-    \item \textbf{Loss calculation}: The loss function computes the error between predictions and targets.
-    \item \textbf{Backward pass}: The loss function initiates backpropagation by computing the initial gradient, which is then propagated backward through the model to compute gradients for all parameters.
-    \item \textbf{Parameter update}: The optimizer updates all parameters based on their gradients.
-    \item \textbf{Progress tracking}: The loss is recorded for later visualization, and periodic updates are printed to monitor training progress.
-\end{enumerate}
-
-At the conclusion of training, the cumulative loss history is visualized to provide insight into the training dynamics and convergence behavior.
 
 
-\section{Experimental Results}
-I conducted experiments on two datasets: linearly separable data and the XOR problem. For each experiment, the MLP was trained using the following hyperparameters:
-\begin{itemize}
-    \item Learning rate: 1.0
-    \item Number of epochs: 100,000
-    \item Number of neurons per hidden layer: 16
-    \item Weight initialization: Normal distribution $\mathcal{N}(0, 1)$
-\end{itemize}
-
-\subsection{Linearly Separable Data}
-For the linearly separable dataset, the model converged rapidly to an accurate decision boundary. Figure \ref{fig:linear_loss} illustrates the training loss curve, showing consistent and stable convergence, while Figure \ref{fig:linear_results} displays the final decision boundary learned by the model.
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.95\linewidth]{figures/results/loss_linear_lr1_n16}
-\caption{\textbf{Training loss curve for linearly separable data.} The loss decreases smoothly and monotonically, indicating stable convergence without oscillation.}
-\label{fig:linear_loss}
-\end{figure}
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.95\linewidth]{figures/results/linear_lr1_n16}
-\caption{\textbf{Decision boundary learned by the MLP on linearly separable data.} The network achieves perfect classification with 100\% accuracy (100/100 samples).}
-\label{fig:linear_results}
-\end{figure}
-
-The model achieved 100\% accuracy on the linearly separable dataset. This result aligns with expectations, as even a simple network architecture can effectively learn the appropriate linear decision boundary.
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.95\linewidth]{figures/linear_loss_acc}
-\caption{\textbf{The training loss and testing accuracy of linearly separable data.}}
-\label{fig:linearlossacc}
-\end{figure}
-
-
-\subsection{XOR Problem}
-The XOR problem presents a more challenging task as it requires a non-linear decision boundary. Figure \ref{fig:xor_loss} shows the training loss over epochs, while Figure \ref{fig:xor_results} illustrates the final decision boundary learned by the model.
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=\linewidth]{figures/results/loss_xor_lr1_n16}
-\caption{\textbf{Training loss curve for the XOR problem.} The loss exhibits more complex dynamics compared to the linear problem but ultimately converges to a low value.}
-\label{fig:xor_loss}
-\end{figure}
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.95\linewidth]{figures/results/xor_lr01_n16}
-\caption{\textbf{Decision boundary learned by the MLP on the XOR problem.} The network successfully forms a non-linear decision boundary that perfectly separates the classes with 100\% accuracy (21/21 samples).}
-\label{fig:xor_results}
-\end{figure}
-
-For the XOR problem, the model achieved 100\% accuracy on the test set. The learned decision boundary clearly demonstrates how the model successfully captured the non-linear relationship, separating the two classes with a complex boundary. This result validates the theoretical capability of multi-layer networks with non-linear activation functions to solve problems beyond the limitations of linear models.
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.95\linewidth]{figures/xor_loss_acc}
-\caption{\textbf{The training loss and testing accuracy of XOR problem.}}
-\label{fig:xorlossacc}
-\end{figure}
-
-
-\section{Discussion}
-
-\subsection{Learning Rate Analysis}
-We conducted experiments with four different learning rates and evaluated their performance over 500 training epochs. As shown in Figures \ref{fig:loss_linear} and \ref{fig:loss_xor}, the learning rate significantly impacts the convergence behavior and final performance of the network.
-
-When the learning rate is set too high (e.g., 10), the loss function exhibits significant oscillation. Although the model eventually converges with a high learning rate, its final performance is suboptimal due to the inability to settle precisely at the minimum of the loss landscape. Conversely, with an excessively small learning rate (e.g., 0.01), the MLP fails to converge within the constraint of 500 epochs, as the parameter updates are too small to make sufficient progress toward the optimal solution.
-
-Our experiments demonstrate that a learning rate of 1 yields optimal accuracy for both datasets, striking a balance between convergence speed and stability. This is quantified in Table \ref{tab:lr}, which shows the clear performance advantage of the moderate learning rate setting.
-
-\begin{figure}[H]
-\resizebox{0.95\linewidth}{!}{%
-\begin{tabular}{cc}
-\includegraphics{figures/results/loss_linear_lr100_n16_e500} & \includegraphics{figures/results/loss_linear_lr10_n16_e500} \\
-\includegraphics{figures/results/loss_linear_lr01_n16_e500} &
-\includegraphics{figures/results/loss_linear_lr001_n16_e500}
-\end{tabular}%
-}
-\caption{\textbf{Loss trajectories for linear classification with varying learning rates.} From top-left to bottom-right: lr=10, lr=1, lr=0.1, and lr=0.01. Note the oscillatory behavior with high learning rates and slow convergence with low learning rates.}
-\label{fig:loss_linear}
-\end{figure}
-
-\begin{figure}[H]
-\resizebox{0.95\linewidth}{!}{%
-\begin{tabular}{cc}
-\includegraphics{figures/results/linear_lr100_n16_e500} & \includegraphics{figures/results/linear_lr10_n16_e500} \\
-\includegraphics{figures/results/linear_lr01_n16_e500} &
-\includegraphics{figures/results/linear_lr001_n16_e500}
-\end{tabular}%
-}
-\caption{\textbf{Decision boundaries for linear classification with varying learning rates.} From top-left to bottom-right: lr=10, lr=1, lr=0.1, and lr=0.01. The optimal learning rate (lr=1) produces the cleanest and most accurate decision boundary.}
-\label{fig:res_linear}
-\end{figure}
-
-\begin{figure}[H]
-\resizebox{0.95\linewidth}{!}{%
-\begin{tabular}{cc}
-\includegraphics{figures/results/loss_xor_lr100_n16_e500} & \includegraphics{figures/results/loss_xor_lr10_n16_e500} \\
-\includegraphics{figures/results/loss_xor_lr01_n16_e500} &
-\includegraphics{figures/results/loss_xor_lr001_n16_e500}
-\end{tabular}%
-}
-\caption{\textbf{Loss trajectories for XOR classification with varying learning rates.} From top-left to bottom-right: lr=10, lr=1, lr=0.1, and lr=0.01. The non-linear XOR problem exhibits more pronounced convergence differences across learning rates, with greater sensitivity to the choice of learning rate.}
-\label{fig:loss_xor}
-\end{figure}
-
-\begin{figure}[H]
-\resizebox{0.95\linewidth}{!}{%
-\begin{tabular}{cc}
-\includegraphics{figures/results/xor_lr100_n16_e500} & \includegraphics{figures/results/xor_lr10_n16_e500} \\
-\includegraphics{figures/results/xor_lr01_n16_e500} &
-\includegraphics{figures/results/xor_lr001_n16_e500}
-\end{tabular}%
-}
-\caption{\textbf{Decision boundaries for XOR classification with varying learning rates.} From top-left to bottom-right: lr=10, lr=1, lr=0.1, and lr=0.01. The complex non-linear decision boundary for the XOR problem requires a well-calibrated learning rate for optimal formation.}
-\label{fig:res_xor}
-\end{figure}
-
-\begin{table}[t]
-\centering
-\caption{\textbf{Classification accuracy (\%) with different learning rates on linear and XOR datasets.} A learning rate of 1 achieves optimal performance on both tasks, while extremely high (10) or low (0.01) learning rates significantly degrade performance.}
-\label{tab:lr}
-\begin{tabular}{@{}ccc@{}}
-\toprule
-\textbf{Learning Rate} & \textbf{Linear} & \textbf{XOR} \\ \midrule
-10          & 97.0            & 61.9         \\
-1           & 100.0           & 100.0        \\
-0.1         & 97.0            & 85.7         \\
-0.01        & 49.0            & 42.9         \\ \bottomrule
-\end{tabular}
-\end{table}
-
-\subsection{Number of Neurons Analysis}
-We conducted experiments with four different network capacities by varying the number of neurons in the hidden layers and evaluated their performance over 500 training epochs. As shown in Figures \ref{fig:loss_linear_n} and \ref{fig:loss_xor_n}, the network architecture significantly impacts convergence behavior and representation capabilities.
-
-With fewer neurons (e.g., 4), the network may lack sufficient capacity to capture complex patterns, particularly for the XOR dataset which requires non-linear decision boundaries. As we increase the number of neurons, the model's representational capacity improves, enabling it to learn more intricate decision boundaries with greater precision.
-
-Our experiments demonstrate that while the linearly separable dataset can be effectively learned with as few as 4 neurons, the XOR problem requires at least 16 neurons to achieve optimal performance, as quantified in Table \ref{tab:num}. This result aligns with theoretical expectations regarding the minimum complexity required to represent certain functions, highlighting the relationship between model capacity and task complexity.
-
-\begin{figure}[H]
-\resizebox{0.95\linewidth}{!}{%
-\begin{tabular}{cc}
-\includegraphics{figures/results/loss_linear_lr1_n4_e500} & \includegraphics{figures/results/loss_linear_lr1_n8_e500} \\
-\includegraphics{figures/results/loss_linear_lr1_n16_e500} &
-\includegraphics{figures/results/loss_linear_lr1_n32_e500}
-\end{tabular}%
-}
-\caption{\textbf{Loss trajectories for linear classification with varying numbers of neurons.} From top-left to bottom-right: n=4, n=8, n=16, and n=32. The convergence patterns show subtle differences across different network capacities, with all configurations eventually reaching low loss values.}
-\label{fig:loss_linear_n}
-\end{figure}
-
-\begin{figure}[H]
-\resizebox{0.95\linewidth}{!}{%
-\begin{tabular}{cc}
-\includegraphics{figures/results/linear_lr1_n4_e500} & \includegraphics{figures/results/linear_lr1_n8_e500} \\
-\includegraphics{figures/results/linear_lr1_n16_e500} &
-\includegraphics{figures/results/linear_lr1_n32_e500}
-\end{tabular}%
-}
-\caption{\textbf{Decision boundaries for linear classification with varying numbers of neurons.} From top-left to bottom-right: n=4, n=8, n=16, and n=32. Even with minimal capacity, the network effectively learns appropriate linear decision boundaries for this task.}
-\label{fig:res_linear_n}
-\end{figure}
-
-\begin{figure}[H]
-\resizebox{0.95\linewidth}{!}{%
-\begin{tabular}{cc}
-\includegraphics{figures/results/loss_xor_lr1_n4_e500} & \includegraphics{figures/results/loss_xor_lr1_n8_e500} \\
-\includegraphics{figures/results/loss_xor_lr1_n16_e500} &
-\includegraphics{figures/results/loss_xor_lr1_n32_e500}
-\end{tabular}%
-}
-\caption{\textbf{Loss trajectories for XOR classification with varying numbers of neurons.} From top-left to bottom-right: n=4, n=8, n=16, and n=32. Networks with fewer neurons struggle to converge for this non-linear problem, demonstrating the relationship between model capacity and representational power.}
-\label{fig:loss_xor_n}
-\end{figure}
-
-\begin{figure}[H]
-\resizebox{0.95\linewidth}{!}{%
-\begin{tabular}{cc}
-\includegraphics{figures/results/xor_lr1_n4_e500} & \includegraphics{figures/results/xor_lr1_n8_e500} \\
-\includegraphics{figures/results/xor_lr1_n16_e500} &
-\includegraphics{figures/results/xor_lr1_n32_e500}
-\end{tabular}%
-}
-\caption{\textbf{Decision boundaries for XOR classification with varying numbers of neurons.} From top-left to bottom-right: n=4, n=8, n=16, and n=32. The XOR problem requires sufficient network capacity to form proper non-linear decision boundaries, with networks having fewer than 16 neurons failing to capture the underlying pattern.}
-\label{fig:res_xor_n}
-\end{figure}
-
-\begin{table}[t]
-\centering
-\caption{\textbf{Classification accuracy (\%) with different numbers of neurons on linear and XOR datasets.} While the linear problem can be solved with as few as 4 neurons, the XOR problem requires at least 16 neurons to achieve optimal performance.}
-\label{tab:num}
-\begin{tabular}{@{}ccc@{}}
-\toprule
-\textbf{Number of Neurons} & \textbf{Linear} & \textbf{XOR} \\ \midrule
-4          & 100.0            & 52.4         \\
-8           & 99.0           & 52.4        \\
-16         & 99.0            & 100.0         \\
-32        & 100.0            & 100.0         \\ \bottomrule
-\end{tabular}
-\end{table}
-
-\subsection{Analysis on Activation Functions}
-In our default configuration, we use a ReLU activation in the first layer and a Sigmoid activation in the second layer. In this analysis, we investigate the impact of removing the activation function in the first layer while retaining the Sigmoid activation in the second layer.
-
-The presence of non-linear activation functions is a critical component in neural networks, particularly for solving complex problems that are not linearly separable. Our experiments demonstrate this fundamental principle by comparing the performance of networks with and without a ReLU activation in the first layer.
-
-For the linear classification task, both configurations achieve comparable performance (99.0\% accuracy in both cases). This outcome is expected since linear problems can be solved with linear transformations alone. The addition of a non-linear activation function provides minimal benefit for such problems, as demonstrated by the nearly identical loss curves and decision boundaries in Figures \ref{fig:loss_linear_act} and \ref{fig:res_linear_act}.
-
-However, for the XOR problem, which is inherently non-linearly separable, the absence of a non-linear activation function in the first layer dramatically reduces performance from 100.0\% to 71.4\% accuracy, as shown in Table \ref{tab:act}. This result underscores the theoretical limitation that a network without non-linear transformations is functionally equivalent to a single linear layer, regardless of its depth. The XOR problem, which requires forming complex decision boundaries that separate data points diagonally, cannot be solved effectively by such linear combinations.
-
-Figures \ref{fig:loss_xor_act} and \ref{fig:res_xor_act} illustrate this stark contrast visually. With the ReLU activation, the network successfully learns the characteristic non-linear decision boundary needed for XOR classification. Without the ReLU, the network attempts to approximate the solution with a linear boundary, resulting in performance only marginally better than random guessing.
-
-This experiment empirically validates the universal approximation theorem, which states that neural networks with at least one hidden layer and non-linear activation functions can approximate any continuous function. When we remove this non-linearity, the network loses its ability to model complex relationships in the data.
-
-\begin{figure}[H]
-\resizebox{0.95\linewidth}{!}{%
-\begin{tabular}{cc}
-\includegraphics{figures/results/loss_linear_lr1_n16_e500} & \includegraphics{figures/results/loss_linear_lr1_n16_e500_no_acti}
-\end{tabular}%
-}
-\caption{\textbf{Loss trajectories for linear classification with different activation functions.} Left: ReLU in first layer, Sigmoid in second layer. Right: No activation in first layer, Sigmoid in second layer. Both configurations converge effectively for the linear problem, showing minimal difference in convergence behavior.}
-\label{fig:loss_linear_act}
-\end{figure}
-
-\begin{figure}[H]
-\resizebox{0.95\linewidth}{!}{%
-\begin{tabular}{cc}
-\includegraphics{figures/results/linear_lr1_n16_e500} & \includegraphics{figures/results/linear_lr1_n16_e500_no_acti}
-\end{tabular}%
-}
-\caption{\textbf{Decision boundaries for linear classification with different activation functions.} Left: ReLU in first layer, Sigmoid in second layer. Right: No activation in first layer, Sigmoid in second layer. Both configurations produce similar decision boundaries for the linear problem, demonstrating that non-linearity is not essential for linearly separable tasks.}
-\label{fig:res_linear_act}
-\end{figure}
-
-\begin{figure}[H]
-\resizebox{0.95\linewidth}{!}{%
-\begin{tabular}{cc}
-\includegraphics{figures/results/loss_xor_lr1_n16_e500} & \includegraphics{figures/results/loss_xor_lr1_n16_e500_no_acti}
-\end{tabular}%
-}
-\caption{\textbf{Loss trajectories for XOR classification with different activation functions.} Left: ReLU in first layer, Sigmoid in second layer. Right: No activation in first layer, Sigmoid in second layer. The absence of non-linearity in the first layer significantly impedes convergence for the XOR problem, with the loss unable to reach the same minimum as the network with ReLU activation.}
-\label{fig:loss_xor_act}
-\end{figure}
-
-\begin{figure}[H]
-\resizebox{0.95\linewidth}{!}{%
-\begin{tabular}{cc}
-\includegraphics{figures/results/xor_lr1_n16_e500} & \includegraphics{figures/results/xor_lr1_n16_e500_no_acti}
-\end{tabular}%
-}
-\caption{\textbf{Decision boundaries for XOR classification with different activation functions.} Left: ReLU in first layer, Sigmoid in second layer. Right: No activation in first layer, Sigmoid in second layer. Without a non-linear activation in the first layer, the model fails to learn the proper complex decision boundary required for the XOR problem.}
-\label{fig:res_xor_act}
-\end{figure}
-
-\begin{table}[t]
-\centering
-\caption{\textbf{Classification accuracy (\%) with different activation function configurations on linear and XOR datasets.} While the linear problem can be solved effectively with or without ReLU in the first layer, the XOR problem requires non-linearity in the hidden layer to achieve acceptable performance.}
-\label{tab:act}
-\begin{tabular}{@{}ccc@{}}
-\toprule
-\textbf{Activation Functions} & \textbf{Linear} & \textbf{XOR} \\ \midrule
-ReLU(), Sigmoid()          & 99.0            & 100.0        \\
-None, Sigmoid()           & 99.0           & 71.4        \\ \bottomrule	
-\end{tabular}
-\end{table}
-
-\section{Questions}
-\paragraph{What is the purpose of activation functions?}
-Activation functions serve several critical purposes in neural networks:
-
-\begin{enumerate}
-    \item \textbf{Non-linearity introduction}: The most fundamental role of activation functions is to introduce non-linearity into the network. Without them, no matter how many layers a neural network has, it would be equivalent to a single linear transformation. Non-linearity enables the network to learn complex patterns and approximate arbitrary functions, as demonstrated by the universal approximation theorem.
-
-    \item \textbf{Feature transformation}: Activation functions transform input signals into different representational spaces, enabling the network to learn hierarchical feature representations across layers. Each layer progressively transforms the data into more abstract and task-relevant representations.
-
-    \item \textbf{Output normalization}: Functions like Sigmoid constrain outputs to specific ranges (e.g., [0,1]), which is particularly useful for classification problems where outputs represent probabilities. Similarly, the softmax function normalizes outputs into a probability distribution, making it suitable for multi-class classification.
-
-    \item \textbf{Gradient flow regulation}: Certain activation functions, such as ReLU and its variants, help mitigate the vanishing gradient problem by maintaining stronger gradient signals during backpropagation, particularly in deeper networks.
-\end{enumerate}
-
-Our experiments with the XOR problem empirically validate the necessity of non-linear activation functions. When we removed the ReLU activation from the first layer, the network's performance on the XOR problem degraded significantly, demonstrating that non-linearity is essential for solving problems that are not linearly separable.
-
-\paragraph{What might happen if the learning rate is too large or too small?}
-The learning rate is a critical hyperparameter that governs the step size during gradient-based optimization. When improperly tuned, several issues can arise:
-
-\textbf{If the learning rate is too large:}
-\begin{itemize}
-    \item \textbf{Overshoot and divergence}: The optimization algorithm may overshoot the minimum of the loss function, causing parameters to oscillate or diverge completely, as seen in our experiments with learning rate=10.
-    \item \textbf{Training instability}: Large oscillations in the loss function make the training process unstable and unpredictable.
-    \item \textbf{Exploding gradients}: In extreme cases, weights can grow to infinity, leading to numerical overflow errors.
-    \item \textbf{Suboptimal convergence}: Even if convergence occurs, the model may settle in a suboptimal region of the parameter space, resulting in reduced performance.
-    \item \textbf{Inability to capture fine details}: Large updates prevent the model from making precise adjustments needed to learn subtle patterns in the data.
-\end{itemize}
-
-\textbf{If the learning rate is too small:}
-\begin{itemize}
-    \item \textbf{Slow convergence}: Training progresses at an exceedingly slow pace, requiring many more iterations to reach acceptable performance, as demonstrated in our experiments with learning rate=0.01.
-    \item \textbf{Local minima trapping}: The model may become trapped in local minima or saddle points, unable to escape due to insufficient momentum in parameter updates.
-    \item \textbf{Premature convergence}: Early stopping criteria may terminate training before the model reaches optimal performance, giving the false impression of convergence.
-    \item \textbf{Underfitting}: Insufficient exploration of the parameter space may lead to underfitting, particularly when training time is constrained.
-    \item \textbf{Sensitivity to initialization}: With small updates, the final model performance becomes highly dependent on the initial parameter values.
-\end{itemize}
-
-Our experimental results in Table \ref{tab:lr} clearly demonstrate these effects, with both very high (10) and very low (0.01) learning rates yielding significantly reduced performance compared to the optimal rate of 1.0. This highlights the importance of proper learning rate tuning in neural network training.
-
-\paragraph{What is the purpose of weights and biases in a neural network?}
-Weights and biases are the fundamental learnable parameters that enable neural networks to adapt to data and solve complex tasks:
-
-\textbf{Weights:}
-\begin{itemize}
-    \item \textbf{Knowledge representation}: Weights encode the learned relationships and patterns extracted from the training data, forming the "knowledge" of the neural network.
-    \item \textbf{Feature importance}: They determine the relative importance of each input feature to neurons in subsequent layers, effectively learning which features are most relevant for the task.
-    \item \textbf{Signal modulation}: Weights modulate the strength of connections between neurons, amplifying or attenuating signals as they propagate through the network.
-    \item \textbf{Hierarchical feature learning}: Through multiple layers, weights transform raw inputs into increasingly abstract and task-relevant representations, enabling the deep hierarchical feature learning that makes neural networks powerful.
-    \item \textbf{Function approximation}: The collective pattern of weights allows neural networks to approximate complex functions, with the universal approximation theorem guaranteeing that sufficiently large networks can approximate any continuous function.
-\end{itemize}
-
-\textbf{Biases:}
-\begin{itemize}
-    \item \textbf{Activation threshold adjustment}: Biases shift the activation function left or right, effectively controlling the threshold at which neurons activate. This allows the network to model data that is not centered around the origin.
-    \item \textbf{Default behavior specification}: They determine a neuron's output when all inputs are zero, providing a baseline activation level that can be either excitatory or inhibitory.
-    \item \textbf{Representational flexibility}: Biases add an extra degree of freedom to each neuron, significantly increasing the expressive power of the network by allowing it to represent functions that do not pass through the origin.
-    \item \textbf{Learning intercepts}: In the context of regression or function approximation, biases allow the network to learn the y-intercept of functions, which would be impossible with weights alone.
-    \item \textbf{Class prior incorporation}: In classification tasks, biases can implicitly model the prior probability of different classes, making the network more sensitive to frequent classes and less sensitive to rare ones.
-\end{itemize}
-
-Together, weights and biases form the complete parameter set that is optimized during training through backpropagation and gradient descent. Our experimental results demonstrate their effectiveness, particularly in learning complex non-linear decision boundaries for the XOR problem.
-
-\section{Extra} \label{sec:extra}
-
-\subsection{ReLU function}
-The Rectified Linear Unit (ReLU) activation function is formally defined as:
-\begin{equation}
-\text{ReLU}(x) = \max(0, x) \, .
-\end{equation}
-Its derivative is: 
-\begin{equation}
-\frac{d}{dx} \text{ReLU}(x) =
-\begin{cases}
-	1, & \text{if } x > 0 \\
-	0, & \text{otherwise.}
-\end{cases}
-\end{equation}
-
-This piecewise-linear activation function has become one of the most widely used in deep learning due to its computational efficiency and effectiveness in mitigating the vanishing gradient problem.
+\paragraph{Evaluation on Test Set:}
+After training, the model is evaluated on the test set:
 
 \begin{code}
-\captionof{listing}{\textbf{Implementation of the ReLU activation function.}}
-\label{code: relu}
+\captionof{listing}{\textbf{Test set evaluation.}}
+\label{code:test_eval}
 \begin{minted}
-class ReLU(NNModule):
-    def __init__(self):
-        self.input = None
+# Load best model for testing
+best_model_path = os.path.join(args.save_dir, 'best_model.pth')
+if os.path.exists(best_model_path):
+    checkpoint = torch.load(best_model_path, map_location=device)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    print(f"Loaded best model with validation Dice score: {checkpoint['val_dice']:.4f}")
 
-    def forward(self, x):
-        self.input = x
-        return np.maximum(0, x)
+model.eval()
+test_loss = 0
+test_dice = 0
 
-    def backward(self, grad):
-        return grad * np.where(self.input > 0, 1, 0)
+with torch.no_grad():
+    for batch in tqdm(test_loader, total=len(test_loader), desc="Testing"):
+        images = batch['image'].to(device)
+        masks = batch['mask'].to(device)
+        
+        outputs = model(images)
+        loss = criterion(outputs, masks)
+        
+        test_loss += loss.item()
+        test_dice += dice_score(outputs, masks)
 
-    def parameters(self):
-        return []  # Activation functions don't have trainable parameters
+test_loss /= len(test_loader)
+test_dice /= len(test_loader)
+
+print(f"Test Loss: {test_loss:.4f}, Test Dice: {test_dice:.4f}")
+
+# Save final model with test results
+torch.save({
+    'model_state_dict': model.state_dict(),
+    'test_loss': test_loss,
+    'test_dice': test_dice,
+}, os.path.join(args.save_dir, f'{args.model}_final.pth'))
+
 \end{minted}
 \end{code}
+
+\subsection{Inference and Visualization}
+For the inference phase, I implemented functionality to apply the trained models to unseen images and visualize the segmentation results:
+
+\begin{code}
+\captionof{listing}{\textbf{Inference implementation.}}
+\label{code:inference}
+\begin{minted}
+def preprocess_image(image_path, img_size=256):
+    """
+    Load and preprocess an image for inference
+    
+    Args:
+        image_path: Path to the image file
+        img_size: Size to resize the image to
+        
+    Returns:
+        Processed image tensor ready for model input
+    """
+    # Load image
+    image = Image.open(image_path).convert('RGB')
+    
+    # Define preprocessing transforms
+    transform = T.Compose([
+        T.Resize((img_size, img_size)),
+        T.ToTensor(),
+        T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+    
+    # Apply transforms
+    image_tensor = transform(image)
+    
+    return image_tensor, image
+
+def predict(model, image_tensor, device, threshold=0.5):
+    """
+    Generate a segmentation mask prediction
+    
+    Args:
+        model: The trained segmentation model
+        image_tensor: Input image tensor
+        device: Device to run inference on
+        threshold: Threshold for binary segmentation
+        
+    Returns:
+        Predicted mask as numpy array
+    """
+    with torch.no_grad():
+        # Add batch dimension and move to device
+        x = image_tensor.unsqueeze(0).to(device)
+        
+        # Forward pass
+        output = model(x)
+        
+        # Apply sigmoid and threshold
+        pred_mask = torch.sigmoid(output) > threshold
+        
+        # Convert to numpy
+        pred_mask = pred_mask.cpu().squeeze().numpy().astype(np.uint8) * 255
+        
+    return pred_mask
+
+def save_prediction(image, mask, output_path):
+    """
+    Visualize and save the prediction results
+    
+    Args:
+        image: Original PIL image
+        mask: Predicted mask as numpy array
+        output_path: Path to save the visualization
+    """
+    # Create a figure with subplots
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    
+    # Plot original image
+    axes[0].imshow(image)
+    axes[0].set_title('Original Image')
+    axes[0].axis('off')
+    
+    # Plot predicted mask
+    axes[1].imshow(mask, cmap='gray')
+    axes[1].set_title('Predicted Mask')
+    axes[1].axis('off')
+    
+    # Plot overlay
+    image_np = np.array(image.resize((mask.shape[1], mask.shape[0])))
+    mask_rgb = np.stack([mask, np.zeros_like(mask), np.zeros_like(mask)], axis=2)
+    overlay = image_np * 0.7 + mask_rgb * 0.3
+    overlay = np.clip(overlay, 0, 255).astype(np.uint8)
+    
+    axes[2].imshow(overlay)
+    axes[2].set_title('Overlay')
+    axes[2].axis('off')
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    
+    # Save raw mask as well
+    mask_path = output_path.replace('.png', '_mask.png')
+    mask_img = Image.fromarray(mask)
+    mask_img.save(mask_path)
+
+def process_batch(model, image_paths, device, output_dir, img_size):
+    """
+    Process a batch of images
+    
+    Args:
+        model: The trained segmentation model
+        image_paths: List of paths to image files
+        device: Device to run inference on
+        output_dir: Directory to save results
+        img_size: Input image size
+    """
+    for image_path in tqdm(image_paths, desc="Processing images"):
+        # Extract filename without extension
+        filename = os.path.splitext(os.path.basename(image_path))[0]
+        
+        # Preprocess image
+        image_tensor, original_image = preprocess_image(image_path, img_size)
+        
+        # Generate prediction
+        pred_mask = predict(model, image_tensor, device)
+        
+        # Save visualization
+        output_path = os.path.join(output_dir, f"{filename}_prediction.png")
+        save_prediction(original_image, pred_mask, output_path)
+\end{minted}
+\end{code}
+
+To evaluate the model's performance across the entire test set, I calculate the average and median Dice score and generate visualizations of the segmentation results:
+
+\begin{code}
+\captionof{listing}{\textbf{Test set evaluation with visualization.}}
+\label{code:evaluate}
+\begin{minted}
+def evaluate(net, data_loader, device, output_dir=None, save_visualizations=False):
+    """
+    Evaluate a trained model on a dataset
+    
+    Args:
+        net: The trained neural network model
+        data_loader: DataLoader for the evaluation dataset
+        device: Device to run the evaluation on (cuda or cpu)
+        output_dir: Directory to save visualization results (if None, no visualizations are saved)
+        save_visualizations: Whether to save visualizations of segmentation results
+        
+    Returns:
+        avg_dice: Average Dice score across the dataset
+        all_dices: List of individual Dice scores for each sample
+    """
+    net.eval()
+    all_dices = []
+    
+    # Create output directory if it doesn't exist
+    if output_dir is not None and save_visualizations:
+        os.makedirs(output_dir, exist_ok=True)
+    
+    with torch.no_grad():
+        for i, batch in enumerate(tqdm(data_loader, desc="Evaluating")):
+            images = batch['image'].to(device)
+            masks = batch['mask'].to(device)
+            
+            # Forward pass
+            outputs = net(images)
+            
+            # Calculate Dice score for each image in the batch
+            for j in range(images.size(0)):
+                img_dice = dice_score(outputs[j:j+1], masks[j:j+1])
+                all_dices.append(img_dice)
+            
+            # Save visualization for some samples
+            if save_visualizations and output_dir is not None and i % 5 == 0:
+                for j in range(min(4, images.size(0))):  # Visualize up to 4 images per batch
+                    visualize_prediction(
+                        images[j].cpu(), 
+                        masks[j].cpu(), 
+                        outputs[j].cpu(),
+                        os.path.join(output_dir, f'sample_{i}_{j}.png')
+                    )
+    
+    # Calculate average Dice score
+    avg_dice = sum(all_dices) / len(all_dices)
+    
+    return avg_dice, all_dices
+
+def visualize_prediction(image, true_mask, pred_logits, save_path=None):
+    """
+    Visualize the model's prediction alongside the input image and ground truth mask
+    
+    Args:
+        image: Input image tensor [C, H, W]
+        true_mask: Ground truth mask tensor [1, H, W]
+        pred_logits: Model's prediction logits tensor [1, H, W]
+        save_path: Path to save the visualization image
+    """
+    # Denormalize the image
+    mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+    std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+    image = image * std + mean
+    
+    # Convert tensors to numpy for visualization
+    image = image.permute(1, 2, 0).numpy()
+    image = np.clip(image, 0, 1)
+    
+    true_mask = true_mask.squeeze().numpy()
+    
+    # Apply sigmoid to get probabilities and threshold to get binary mask
+    pred_probs = torch.sigmoid(pred_logits).squeeze().numpy()
+    pred_mask = (pred_probs > 0.5).astype(np.float32)
+    
+    # Create the figure with three subplots
+    fig, axes = plt.subplots(1, 4, figsize=(16, 4))
+    
+    # Plot the original image
+    axes[0].imshow(image)
+    axes[0].set_title('Original Image')
+    axes[0].axis('off')
+    
+    # Plot the ground truth mask
+    axes[1].imshow(true_mask, cmap='gray')
+    axes[1].set_title('Ground Truth Mask')
+    axes[1].axis('off')
+    
+    # Plot the predicted probability map
+    axes[2].imshow(pred_probs, cmap='viridis')
+    axes[2].set_title('Prediction Probabilities')
+    axes[2].axis('off')
+    
+    # Plot the thresholded prediction mask
+    axes[3].imshow(pred_mask, cmap='gray')
+    axes[3].set_title('Predicted Mask')
+    axes[3].axis('off')
+    
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+\end{minted}
+\end{code}
+
+This evaluation framework allows for both quantitative assessment of the model's performance through the Dice score and qualitative assessment through visualization of the segmentation masks.
+
+\subsection{Hyperparameters}
+For training both the UNet and ResNet34-UNet models, I used the following hyperparameters:
+
+\begin{itemize}
+    \item \textbf{Image size}: 256x256 pixels
+    \item \textbf{Batch size}: 32 (UNet), 128 (ResNet34-UNet)
+    \item \textbf{Optimizer}: AdamW
+    \item \textbf{Learning rate}: 1e-3
+    \item \textbf{Weight decay}: 1e-2
+    \item \textbf{Scheduler}: OneCycleLR with 10\% warm-up epochs
+    \item \textbf{Number of epochs}: 50
+    \item \textbf{Loss function}: BCEWithLogitsLoss
+\end{itemize}
+
+These hyperparameters were selected based on experimental validation and best practices in semantic segmentation tasks.
+
+
+\section{Data Preprocessing}
+
+Data preprocessing is a crucial step for achieving good performance in semantic segmentation tasks. The Oxford-IIIT Pet Dataset contains images of cats and dogs with pixel-level annotations for pet regions.
+
+\paragraph{Dataset Handling:}
+I implemented a custom dataset class that inherits from PyTorch's \texttt{Dataset} class to handle the Oxford-IIIT Pet Dataset:
+
+\begin{code}
+\captionof{listing}{\textbf{Implementation of the Oxford Pet Dataset class.}}
+\label{code:oxford_pet}
+\begin{minted}
+class OxfordPetDataset(torch.utils.data.Dataset):
+    def __init__(self, root, mode="train", transform=None):
+        assert mode in {"train", "valid", "test"}
+        
+        self.root = root
+        self.mode = mode
+        self.transform = transform
+
+        self.images_directory = os.path.join(self.root, "images")
+        self.masks_directory = os.path.join(self.root, "annotations", "trimaps")
+
+        self.filenames = self._read_split()  # read train/valid/test splits
+
+    def __len__(self):
+        return len(self.filenames)
+
+    def __getitem__(self, idx):
+        filename = self.filenames[idx]
+        image_path = os.path.join(self.images_directory, filename + ".jpg")
+        mask_path = os.path.join(self.masks_directory, filename + ".png")
+
+        image = np.array(Image.open(image_path).convert("RGB"))
+
+        trimap = np.array(Image.open(mask_path))
+        mask = self._preprocess_mask(trimap)
+
+        sample = dict(image=image, mask=mask, trimap=trimap)
+        return sample
+
+    @staticmethod
+    def _preprocess_mask(mask):
+        mask = mask.astype(np.float32)
+        mask[mask == 2.0] = 0.0
+        mask[(mask == 1.0) | (mask == 3.0)] = 1.0
+        return mask
+
+    def _read_split(self):
+        split_filename = "test.txt" if self.mode == "test" else "trainval.txt"
+        split_filepath = os.path.join(self.root, "annotations", split_filename)
+        with open(split_filepath) as f:
+            split_data = f.read().strip("\n").split("\n")
+        filenames = [x.split(" ")[0] for x in split_data]
+        if self.mode == "train":  # 90% for train
+            filenames = [x for i, x in enumerate(filenames) if i % 10 != 0]
+        elif self.mode == "valid":  # 10% for validation
+            filenames = [x for i, x in enumerate(filenames) if i % 10 == 0]
+        return filenames
+\end{minted}
+\end{code}
+
+\paragraph{Preprocessing and Augmentation:}
+To enhance model generalization and performance, I applied several data preprocessing and augmentation techniques:
+
+\begin{code}
+\captionof{listing}{\textbf{Implementation of data preprocessing and augmentation.}}
+\label{code:data_aug}
+\begin{minted}
+class SimpleOxfordPetDataset(OxfordPetDataset):
+    def __init__(self, root, mode="train"):
+        super().__init__(root, mode)
+        train_transform = T.Compose([
+            T.ToImage(),
+            T.RandomHorizontalFlip(p=0.5),
+            T.RandomVerticalFlip(p=0.5),
+            T.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+            T.ToDtype(torch.float32, scale=True),
+        ])
+        val_transorm = T.Compose([
+            T.ToImage(),
+            T.ToDtype(torch.float32, scale=True),
+        ])
+        self.transform = train_transform if mode == 'train' else val_transorm
+        self.normalize = T.Compose([
+            T.Normalize(mean=[0.485, 0.456, 0.406], 
+                        std=[0.229, 0.224, 0.225])
+        ])
+        
+    def __getitem__(self, *args, **kwargs):
+        sample = super().__getitem__(*args, **kwargs)
+
+        # resize images
+        image = np.array(Image.fromarray(sample["image"]).resize((256, 256), Image.BILINEAR))
+        mask = np.array(Image.fromarray(sample["mask"]).resize((256, 256), Image.NEAREST))
+        trimap = np.array(Image.fromarray(sample["trimap"]).resize((256, 256), Image.NEAREST))
+
+        sample["trimap"] = np.expand_dims(trimap, 0)
+      
+  
+        sample["image"], sample["mask"] = self.transform(image, mask)
+        sample["image"] = self.normalize(sample["image"])
+
+        return sample
+\end{minted}
+\end{code}
+
+The preprocessing and augmentation pipeline includes:
+\begin{itemize}
+    \item \textbf{Resizing}: All images and masks are resized to 256×256 pixels for consistent input dimensions. This is done by provided code.
+    \item \textbf{Data type conversion}: Images and masks are converted to PyTorch tensors with \texttt{float32} data type and normalized to [0,1] range.
+    \item \textbf{Data augmentation (training only)}:
+    \begin{itemize}
+        \item \textbf{Random horizontal flip} with 50\% probability.
+        \item \textbf{Random vertical flip} with 50\% probability.
+        \item \textbf{Color jittering} with brightness, contrast, and saturation adjustments of ±20\%.
+    \end{itemize}
+    \item \textbf{Normalization}: Images are normalized using the ImageNet mean and standard deviation. Models learn faster with normalization.
+    \item \textbf{Mask preprocessing}: The trimap annotations (which have values 1, 2, and 3) are converted to binary masks where 1 and 3 represent the foreground (pet) and 2 represents the background.
+\end{itemize}
+
+These augmentation techniques help prevent overfitting and improve the model's ability to generalize to unseen images with varying lighting conditions, orientations, and appearances. We will also discuss the performance difference with and without data argumentation.
+
+\section{Experiment Results Analysis} \label{sec:exp}
+\subsection{Data argumentation}
+
+In this experiment, I evaluated model performance with and without data augmentation. The baseline approach involved only resizing images to 256x256 pixels and normalizing them using ImageNet's mean and standard deviation. For comprehensive assessment, I tested both U-Net and ResNet34\_U-Net architectures under identical training conditions: a learning rate of 0.001 with cosine annealing scheduler, trained over 50 epochs. This controlled comparison allowed me to isolate the impact of data augmentation on segmentation quality.
+
+
+\paragraph{U-Net.}
+As illustrated in \autoref{fig:augunettrainloss} and \autoref{fig:augunettraindice}, the model trained without data augmentation exhibits lower training loss and higher training Dice scores. However, examining the validation loss in \autoref{fig:augunetvalloss} reveals a concerning pattern: after epoch 25, the validation loss for the model without data argumentation increases. This trend clearly indicates an overfitting problem stemming from the lack of data augmentation in the training pipeline. In contrast, the model trained with data augmentation maintains stable validation performance, effectively mitigating the overfitting issue and achieving higher validation Dice scores by the end of training, as demonstrated in \autoref{fig:augunetvaldice}. The benefits of data augmentation extend to test set performance as well, with the U-Net model with data argumentation achieving a Dice score of 0.9269, compared to just 0.9209 for the baseline model under identical training conditions.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{figs/aug_unet_train_loss}
+\caption{\textbf{The training loss over epochs.} \texttt{unet-data-cosine} is the model with data argumentation, while \texttt{unet-cosine-1e-3} is without data argumentation.}
+\label{fig:augunettrainloss}
+\end{figure}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{figs/aug_unet_train_dice}
+\caption{\textbf{The training Dice score over epochs.} \texttt{unet-data-cosine} is the model with data argumentation, while \texttt{unet-cosine-1e-3} is without data argumentation. The model without data argumentation achieves higher training Dice scores but performs worse on validation data.}
+\label{fig:augunettraindice}
+\end{figure}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{figs/aug_unet_val_loss}
+\caption{\textbf{The validation loss over epochs.} \texttt{unet-data-cosine} is the model with data argumentation, while \texttt{unet-cosine-1e-3} is without data argumentation. The validation loss for the model without data argumentation increases after epoch 25, indicating overfitting.}
+\label{fig:augunetvalloss}
+\end{figure}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{figs/aug_unet_val_dice}
+\caption{\textbf{The validation Dice score over epochs.} \texttt{unet-data-cosine} is the model with data argumentation, while \texttt{unet-cosine-1e-3} is without data argumentation. Data argumentation helps maintain higher validation Dice scores throughout training, demonstrating better generalization.}
+\label{fig:augunetvaldice}
+\end{figure}
+
+
+\paragraph{ResNet34\_U-Net.} We observe similar validation loss behavior on the ResNet34\_U-Net architecture. As shown in \autoref{fig:augresnettrainloss} and \autoref{fig:augresnettraindice}, the model without data augmentation achieves lower training loss and higher training Dice scores initially. However, examining the validation metrics reveals the same pattern of overfitting. In \autoref{fig:augresnetvalloss}, we can see that the validation loss for the non-augmented model begins to increase around epoch 20, while the augmented model maintains a steadier, lower validation loss throughout training. This translates to superior validation Dice scores for the augmented model, as displayed in \autoref{fig:augresnetvaldice}.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{figs/aug_resnet_train_loss}
+\caption{\textbf{The training loss over epochs for ResNet34\_U-Net.} \texttt{resnet-data-cosine} is the model with data augmentation, while \texttt{resnet-cosine-1e-3} is without data augmentation.}
+\label{fig:augresnettrainloss}
+\end{figure}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{figs/aug_resnet_train_dice}
+\caption{\textbf{The training Dice score over epochs for ResNet34\_U-Net.} \texttt{resnet-data-cosine} is the model with data augmentation, while \texttt{resnet-cosine-1e-3} is without data augmentation. The non-augmented model shows higher training Dice scores but fails to generalize as well to validation data.}
+\label{fig:augresnettraindice}
+\end{figure}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{figs/aug_resnet_val_loss}
+\caption{\textbf{The validation loss over epochs for ResNet34\_U-Net.} \texttt{resnet-data-cosine} is the model with data augmentation, while \texttt{resnet-cosine-1e-3} is without data augmentation. The validation loss for the non-augmented model increases after epoch 20, indicating overfitting.}
+\label{fig:augresnetvalloss}
+\end{figure}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{figs/aug_resnet_val_dice}
+\caption{\textbf{The validation Dice score over epochs for ResNet34\_U-Net.} \texttt{resnet-data-cosine} is the model with data augmentation, while \texttt{resnet-cosine-1e-3} is without data augmentation. The augmented model demonstrates more stable and higher validation performance throughout training.}
+\label{fig:augresnetvaldice}
+\end{figure}
+
+Based on these consistent findings across both architectures, we conclude that data augmentation is essential for mitigating overfitting and improving generalization in semantic segmentation tasks with the Oxford-IIIT Pet Dataset. The augmentation techniques, including random horizontal and vertical flips and color jittering, effectively increase the diversity of the training data without requiring additional labeled samples. This approach leads to more robust models that perform better on unseen data. Therefore, we will apply data augmentation in all successive experiments to ensure optimal model performance and generalization capability.
+
+
+
+\subsection{Learning rate scheduling}
+In this experiment, I evaluated both models using two different learning rate schedulers: CosineAnnealingLR and OneCycleLR. The CosineAnnealingLR scheduler follows a cosine wave function to gradually decrease the learning rate from its initial value to near-zero over the training period. In contrast, the OneCycleLR scheduler implements a three-phase approach: it begins with a low initial learning rate, gradually increases it during the first 10\% of training epochs until reaching the maximum specified value, and then decreases it following a cosine curve back to a minimal value by the end of training. This comparison allows us to assess how different learning rate trajectories affect model convergence and final performance.
+
+\paragraph{U-Net.} For the U-Net architecture, we observe distinct differences in training dynamics between the two schedulers. As shown in \autoref{fig:lrunetlr}, the learning rate trajectories differ significantly, with OneCycleLR featuring an initial warm-up phase followed by a steeper decline. This learning rate pattern appears to benefit the U-Net model, as evidenced by the training loss in \autoref{fig:lrunettrainloss} and training Dice score in \autoref{fig:lrunettraindice}. The OneCycleLR scheduler achieves lower training loss and higher training Dice scores, particularly in the later stages of training.
+
+More importantly, the validation metrics demonstrate the superiority of the OneCycleLR approach. In \autoref{fig:lrunetvalloss}, we can see that the validation loss for the OneCycleLR-trained model is consistently lower after the initial epochs, suggesting better generalization. This translates to higher validation Dice scores as illustrated in \autoref{fig:lrunetvaldice}, with the OneCycleLR model maintaining a clear advantage throughout most of the training process.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{figs/lr_unet_lr}
+\caption{\textbf{Learning rate over epochs for U-Net models.} \texttt{unet-data-cosine} uses the CosineAnnealingLR scheduler, while \texttt{unet-data-onecycle} uses the OneCycleLR scheduler. Note the distinctive warm-up phase in the OneCycleLR approach.}
+\label{fig:lrunetlr}
+\end{figure}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{figs/lr_unet_train_loss}
+\caption{\textbf{Training loss over epochs for U-Net models.} \texttt{unet-data-cosine} uses the CosineAnnealingLR scheduler, while \texttt{unet-data-onecycle} uses the OneCycleLR scheduler. The OneCycleLR approach achieves lower training loss, particularly in the later stages of training.}
+\label{fig:lrunettrainloss}
+\end{figure}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{figs/lr_unet_train_dice}
+\caption{\textbf{Training Dice score over epochs for U-Net models.} \texttt{unet-data-cosine} uses the CosineAnnealingLR scheduler, while \texttt{unet-data-onecycle} uses the OneCycleLR scheduler. The OneCycleLR scheduler enables the model to achieve higher training Dice scores.}
+\label{fig:lrunettraindice}
+\end{figure}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{figs/lr_unet_val_loss}
+\caption{\textbf{Validation loss over epochs for U-Net models.} \texttt{unet-data-cosine} uses the CosineAnnealingLR scheduler, while \texttt{unet-data-onecycle} uses the OneCycleLR scheduler. The OneCycleLR approach maintains lower validation loss, indicating better generalization.}
+\label{fig:lrunetvalloss}
+\end{figure}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{figs/lr_unet_val_dice}
+\caption{\textbf{Validation Dice score over epochs for U-Net models.} \texttt{unet-data-cosine} uses the CosineAnnealingLR scheduler, while \texttt{unet-data-onecycle} uses the OneCycleLR scheduler. The OneCycleLR approach achieves consistently higher validation Dice scores throughout training.}
+\label{fig:lrunetvaldice}
+\end{figure}
+
+\paragraph{ResNet34\_U-Net.} Similar trends emerge when applying these learning rate schedulers to the ResNet34\_U-Net architecture. As shown in \autoref{fig:lrresnetlr}, the learning rate patterns follow the same principles as with the U-Net model. The training loss in \autoref{fig:lrresnsettrainloss} shows that the OneCycleLR scheduler initially leads to higher losses during the warm-up phase, but quickly achieves lower training loss as the learning rate decreases. This is mirrored in the training Dice scores depicted in \autoref{fig:lrresnettraindice}, where the OneCycleLR model rapidly improves after the initial epochs.
+
+The validation performance, as illustrated in \autoref{fig:lrresnetvalloss} and \autoref{fig:lrresnetvaldice}, demonstrates that the OneCycleLR approach produces a model with better generalization capabilities. The validation loss is consistently lower, and the validation Dice score is higher for the model trained with OneCycleLR.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{figs/lr_resnet_lr}
+\caption{\textbf{Learning rate over epochs for ResNet34\_U-Net models.} \texttt{resnet-data-cosine} uses the CosineAnnealingLR scheduler, while \texttt{resnet-data-onecycle} uses the OneCycleLR scheduler, showing the characteristic warm-up and cool-down phases.}
+\label{fig:lrresnetlr}
+\end{figure}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{figs/lr_resnset_train_loss}
+\caption{\textbf{Training loss over epochs for ResNet34\_U-Net models.} \texttt{resnet-data-cosine} uses the CosineAnnealingLR scheduler, while \texttt{resnet-data-onecycle} uses the OneCycleLR scheduler. After the initial warm-up phase, the OneCycleLR approach achieves lower training loss.}
+\label{fig:lrresnsettrainloss}
+\end{figure}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{figs/lr_resnet_train_dice}
+\caption{\textbf{Training Dice score over epochs for ResNet34\_U-Net models.} \texttt{resnet-data-cosine} uses the CosineAnnealingLR scheduler, while \texttt{resnet-data-onecycle} uses the OneCycleLR scheduler. The OneCycleLR scheduler enables faster improvement in training Dice scores after the initial warm-up phase.}
+\label{fig:lrresnettraindice}
+\end{figure}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{figs/lr_resnet_val_loss}
+\caption{\textbf{Validation loss over epochs for ResNet34\_U-Net models.} \texttt{resnet-data-cosine} uses the CosineAnnealingLR scheduler, while \texttt{resnet-data-onecycle} uses the OneCycleLR scheduler. The OneCycleLR approach maintains lower validation loss throughout most of the training process.}
+\label{fig:lrresnetvalloss}
+\end{figure}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{figs/lr_resnet_val_dice}
+\caption{\textbf{Validation Dice score over epochs for ResNet34\_U-Net models.} \texttt{resnet-data-cosine} uses the CosineAnnealingLR scheduler, while \texttt{resnet-data-onecycle} uses the OneCycleLR scheduler. The OneCycleLR approach demonstrates superior validation performance.}
+\label{fig:lrresnetvaldice}
+\end{figure}
+
+These results consistently demonstrate that the OneCycleLR scheduler outperforms the CosineAnnealingLR scheduler for both architectures. The initial warm-up phase in OneCycleLR allows the models to explore the parameter space more effectively before gradually reducing the learning rate. This approach appears to help the models escape poor local minima early in training while still allowing for fine-tuning of weights in later epochs. The improvement is substantial, with OneCycleLR yielding approximately a 1\% increase in Dice score for U-Net. Based on these findings, we will use the OneCycleLR scheduler in all subsequent experiments to maximize model performance.
+
+
+\subsection{Model architectures}
+After establishing the optimal data preprocessing and training strategies, I conducted a comprehensive comparison of the U-Net and ResNet34\_U-Net architectures to determine their relative strengths in binary semantic segmentation. Both models were trained with identical hyperparameters: using data augmentation, the OneCycleLR scheduler, a base learning rate of 0.001, and training for 50 epochs.
+
+Table \ref{tab:model_comparison} presents the detailed performance metrics of both architectures on the test set.
+\begin{table}[h]
+\centering
+\caption{\textbf{Performance comparison of U-Net and ResNet34\_U-Net architectures.} Both models were trained with data augmentation, OneCycleLR scheduler, and identical hyperparameters.}
+\label{tab:model_comparison}
+\resizebox{0.95\linewidth}{!}{%
+\begin{tabular}{lcc}
+\toprule
+\textbf{Metric} & \textbf{U-Net} & \textbf{ResNet34\_U-Net} \\
+\midrule
+Average Dice Score & 0.9291 & 0.9179 \\
+Median Dice Score & 0.9528 & 0.9455 \\
+Standard Deviation & 0.0842 & 0.0937 \\
+Minimum Dice Score & 0.0000 & 0.0000 \\
+Maximum Dice Score & 0.9982 & 0.9958 \\
+Total Training Time (RTX 4090) & 30m & 16m \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+Interestingly, the U-Net architecture outperformed the more complex ResNet34\_U-Net across all accuracy metrics. The U-Net achieved a higher average Dice score (0.9291 vs. 0.9179) and median Dice score (0.9528 vs. 0.9455), while also demonstrating lower variability with a standard deviation of 0.0842 compared to 0.0937 for ResNet34\_U-Net. This suggests that the simpler U-Net architecture offers more consistent performance across the test dataset.
+
+Both models struggled with certain challenging images, as evidenced by the minimum Dice score of 0.0000, indicating complete segmentation failure on at least one test sample. However, they both achieved excellent results on well-defined samples, with maximum Dice scores exceeding 0.99.
+
+The superior performance of U-Net is somewhat surprising given that ResNet34\_U-Net incorporates residual connections, which typically aid in training deeper networks by mitigating gradient vanishing problems. However, for this particular dataset and binary segmentation task, the simpler U-Net architecture appears to be more effective. This could be attributed to several factors:
+
+\begin{enumerate}
+\item The Oxford-IIIT Pet Dataset may not be complex enough to benefit from the additional capacity of ResNet34\_U-Net.
+\item The ResNet34 encoder's aggressive use of maxpooling and strided convolutions to rapidly reduce spatial dimensions likely causes loss of fine-grained spatial information that's crucial for precise boundary segmentation. While this design choice makes ResNet efficient for classification tasks, it can be detrimental for pixel-level segmentation where spatial precision is paramount.
+\item The U-Net's more direct skip connections between corresponding encoder and decoder layers may preserve spatial information more effectively for this specific segmentation task.
+\end{enumerate}
+
+Despite the performance advantage of U-Net, it's worth noting that the ResNet34\_U-Net offers a significant computational efficiency benefit, with total training time approximately 47\% faster than the standard U-Net (16 minutes vs. 30 minutes for the complete 50-epoch training run on an RTX 4090). This efficiency stems from ResNet's design choices that reduce feature map sizes earlier in the network, resulting in fewer operations in the deeper layers.
+
+These findings highlight that architectural complexity does not always translate to better performance, and that the standard U-Net remains a strong baseline for semantic segmentation tasks, particularly when properly trained with data augmentation and appropriate learning rate scheduling. However, in scenarios where computational resources or training time are limited, the ResNet34\_U-Net could be a reasonable alternative with only a modest decrease in segmentation quality.
+
+\subsection{Visual results}
+
+\section{Execution steps}
+\section{Discussion} \label{sec:discussion}
+
 
 \end{document}
