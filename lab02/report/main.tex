@@ -1256,10 +1256,90 @@ The superior performance of U-Net is somewhat surprising given that ResNet34\_U-
 Despite the performance advantage of U-Net, it's worth noting that the ResNet34\_U-Net offers a significant computational efficiency benefit, with total training time approximately 47\% faster than the standard U-Net (16 minutes vs. 30 minutes for the complete 50-epoch training run on an RTX 4090). This efficiency stems from ResNet's design choices that reduce feature map sizes earlier in the network, resulting in fewer operations in the deeper layers.
 
 These findings highlight that architectural complexity does not always translate to better performance, and that the standard U-Net remains a strong baseline for semantic segmentation tasks, particularly when properly trained with data augmentation and appropriate learning rate scheduling. However, in scenarios where computational resources or training time are limited, the ResNet34\_U-Net could be a reasonable alternative with only a modest decrease in segmentation quality.
-
 \subsection{Visual results}
+I provide some segmentation results of both models in this section.
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{figs/unet_sample_0_0}
+\caption{\textbf{U-Net segmentation example 1.} From left to right: original image, ground truth mask, prediction probability map, and binary prediction mask. The U-Net accurately captures the cat's outline with high confidence.}
+\label{fig:unetsample00}
+\end{figure}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{figs/resnet_sample_0_0}
+\caption{\textbf{ResNet34\_U-Net segmentation example 1.} From left to right: original image, ground truth mask, prediction probability map, and binary prediction mask. The ResNet34\_U-Net produces similar results to U-Net for this clear example.}
+\label{fig:resnetsample00}
+\end{figure}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{figs/unet_sample_60_2}
+\caption{\textbf{U-Net segmentation example 2.} From left to right: original image, ground truth mask, prediction probability map, and binary prediction mask. The U-Net successfully segments the dog despite the challenging lighting conditions and complex pose.}
+\label{fig:unetsample602}
+\end{figure}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{figs/resnet_sample_60_2}
+\caption{\textbf{ResNet34\_U-Net segmentation example 2.} From left to right: original image, ground truth mask, prediction probability map, and binary prediction mask. The ResNet34\_U-Net shows slightly less precise boundary delineation compared to U-Net for this example.}
+\label{fig:resnetsample602}
+\end{figure}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{figs/unet_sample_35_0}
+\caption{\textbf{U-Net segmentation example 3.} From left to right: original image, ground truth mask, prediction probability map, and binary prediction mask. The U-Net correctly identifies the cat and produces a clean segmentation mask.}
+\label{fig:unetsample350}
+\end{figure}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{figs/resnet_sample_35_0}
+\caption{\textbf{ResNet34\_U-Net segmentation example 3.} From left to right: original image, ground truth mask, prediction probability map, and binary prediction mask. The ResNet34\_U-Net generates a more fragmented probability map with less confidence at the boundaries.}
+\label{fig:resnetsample350}
+\end{figure}
+
+These visual examples illustrate the performance differences between the two architectures. While both models perform well on clear, well-defined images (as shown in Figures \ref{fig:unetsample350} and \ref{fig:resnetsample350}), the U-Net tends to produce more precise boundary segmentation with higher confidence at the object edges.
+
+In the more challenging cases (Figures \ref{fig:unetsample602}, \ref{fig:resnetsample602}, \ref{fig:unetsample00}, and \ref{fig:resnetsample00}), the U-Net's probability maps show stronger boundary definition and more consistent confidence across the pet's body. The ResNet34\_U-Net's segmentations, while generally accurate, often display more uncertainty at object boundaries and occasionally produce more fragmented probability maps.
+
+These visual results align with the quantitative findings, where U-Net achieved higher Dice scores and lower standard deviation. The examples suggest that U-Net's architecture, with its direct skip connections and gradual spatial dimension reduction, better preserves the fine-grained spatial information necessary for precise boundary delineation in semantic segmentation tasks. The ResNet34\_U-Net, while computationally more efficient, appears to sacrifice some precision in boundary detection, likely due to the more aggressive downsampling in its encoder path.
 
 \section{Execution steps}
+
+Please execute all scripts from the root directory.
+
+\subsection{Training}
+
+\begin{code}
+\captionof{listing}{\textbf{The training commands.}}
+\begin{minted}
+python train.py --data\_path ./dataset/oxford-iiit-pet --epochs 50 --scheduler onecycle --model unet --batch\_size 32 --learning-rate 0.001  # for training unet
+
+python train.py --data\_path ./dataset/oxford-iiit-pet --epochs 50 --scheduler onecycle --model resnet34\_unet --batch\_size 128 --learning-rate 0.001  # for training resnet34-unet
+\end{minted}
+\end{code}
+
+
+
+\subsection{Evaluation}
+
+\begin{code}
+\captionof{listing}{\textbf{The evaluation commands.}}
+\begin{minted}
+python src/evaluate.py --model saved_models/unet_final.pth --data_path dataset/oxford-iiit-pet/ --model_type unet   # for evalauting unet
+
+python src/evaluate.py --model saved_models/resnet34_unet_final.pth --data_path dataset/oxford-iiit-pet/ --model_type resnet34_unet  # for evalauting resnet34-unet
+\end{minted}
+\end{code}
+
+
+\subsection{Inference}
+\begin{code}
+\captionof{listing}{\textbf{The inference commands.}}
+\begin{minted}
+python src/inference.py --model saved_models/unet_final.pth --data_path <image folder path> --model_type unet
+
+python src/inference.py --model saved_models/resnet34_unet_final.pth --data_path <image folder path> --model_type resnet34_unet
+\end{minted}
+\end{code}
+
 \section{Discussion} \label{sec:discussion}
 
 
