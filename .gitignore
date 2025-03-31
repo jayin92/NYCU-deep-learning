@@ -9,6 +9,11 @@ lab02/predictions*
 wandb
 lab03/dataset/*
 !lab03/dataset/.gitkeep
+lab03/imga
+lab03/test_results
+lab03/mask_scheduling
+lab03/checkpoints_transformer/*.pth
+lab03/fid_results
 
 # C extensions
 *.so
