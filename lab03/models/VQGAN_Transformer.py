@@ -34,8 +34,9 @@ class MaskGit(nn.Module):
 ##TODO2 step1-1: input x fed to vqgan encoder to get the latent and zq
     @torch.no_grad()
     def encode_to_z(self, x):
-        raise Exception('TODO2 step1-1!')
-        return None
+        codebook_mapping, codebook_indices, _ = self.vqgan.encode(x)
+
+        return codebook_mapping, codebook_indices.reshape(codebook_mapping.shape[0], -1)
     
 ##TODO2 step1-2:    
     def gamma_func(self, mode="cosine"):
@@ -51,48 +52,70 @@ class MaskGit(nn.Module):
 
         """
         if mode == "linear":
-            raise Exception('TODO2 step1-2!')
-            return None
+            def linear_func(x):
+                return 1 - x
+            return linear_func
         elif mode == "cosine":
-            raise Exception('TODO2 step1-2!')
-            return None
+            def cosine_func(x):
+                return np.cos(np.pi * x / 2)
+            return cosine_func            
         elif mode == "square":
-            raise Exception('TODO2 step1-2!')
-            return None
+            def square_func(x):
+                return 1 - x ** 2
+            return square_func   
         else:
             raise NotImplementedError
 
 ##TODO2 step1-3:            
     def forward(self, x):
-        
-        z_indices=None #ground truth
-        logits = None  #transformer predict the probability of tokens
-        raise Exception('TODO2 step1-3!')
+        _, z_indices = self.encode_to_z(x)  # ground truth
+        mask_tokens = torch.full_like(z_indices, self.mask_token_id)  # mask token
+        mask = torch.bernoulli(torch.full(z_indices.shape, 0.5)).bool()  # mask ratio
+
+        new_z_indices = z_indices.clone()
+        new_z_indices[mask] = mask_tokens[mask]
+
+        logits = self.transformer(new_z_indices)  # transformer predict the probability of tokens
         return logits, z_indices
     
 ##TODO3 step1-1: define one iteration decoding   
     @torch.no_grad()
-    def inpainting(self):
-        raise Exception('TODO3 step1-1!')
-        logits = self.transformer(None)
-        #Apply softmax to convert logits into a probability distribution across the last dimension.
-        logits = None
+    def inpainting(self, z_indices, mask, mask_num, ratio, mask_func):
 
-        #FIND MAX probability for each token value
-        z_indices_predict_prob, z_indices_predict = None
-
-        ratio=None 
-        #predicted probabilities add temperature annealing gumbel noise as confidence
-        g = None  # gumbel noise
-        temperature = self.choice_temperature * (1 - ratio)
-        confidence = z_indices_predict_prob + temperature * g
-        
         #hint: If mask is False, the probability should be set to infinity, so that the tokens are not affected by the transformer's prediction
         #sort the confidence for the rank 
         #define how much the iteration remain predicted tokens by mask scheduling
         ##At the end of the decoding process, add back the original(non-masked) token values
         
-        mask_bc=None
+        masked_z_indices = z_indices.clone()
+        masked_z_indices[mask] = self.mask_token_id
+
+        logits = self.transformer(masked_z_indices) # B x num_image_tokens x num_codebook_vectors
+        # Apply softmax to convert logits into a probability distribution across the last dimension.
+        probs = logits.softmax(dim=-1)
+        # Get the predicted probabilities for the masked tokens
+        z_indices_predict = torch.distributions.Categorical(logits=logits).sample()  # sample from the predicted distribution
+        while torch.any(z_indices_predict == self.mask_token_id):
+            z_indices_predict = torch.distributions.Categorical(logits=logits).sample()
+
+        # FIND MAX probability for each token value
+        z_indices_predict[~mask] = z_indices[~mask]  # keep the original tokens for unmasked positions
+        z_indices_predict_prob = probs.gather(-1, z_indices_predict.unsqueeze(-1)).squeeze(-1)  # B x num_image_tokens
+        z_indices_predict_prob = torch.where(mask, z_indices_predict_prob, torch.full_like(z_indices_predict_prob, float('inf')))  # set unmasked positions to inf
+
+        mask_ratio = self.gamma_func(mask_func)(ratio)  # apply the mask function to get the ratio
+        print(f"mask ratio: {mask_ratio}")
+        # Calculate the number of masked tokens based on the ratio
+        mask_len = int(mask_num * mask_ratio)  # number of masked tokens
+        #predicted probabilities add temperature annealing gumbel noise as confidence
+        g = torch.distributions.Gumbel(0, 1).sample(z_indices_predict_prob.shape).to(z_indices_predict_prob.device)  # gumbel noise
+        temperature = self.choice_temperature * (1 - ratio)
+        confidence = z_indices_predict_prob + temperature * g
+        sorted_confidence, _ = torch.sort(confidence, dim=-1)  # sort the confidence scores
+        threshold = sorted_confidence[:, mask_len].unsqueeze(-1)
+        mask_bc = confidence < threshold  # new mask has confiedence less than the threshold
+        # Set the masked tokens to the mask token id
+
         return z_indices_predict, mask_bc
     
 __MODEL_TYPE__ = {
