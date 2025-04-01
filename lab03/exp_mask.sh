@@ -8,13 +8,19 @@ output_file="fid_results/fid_scores.txt"
 csv_output="fid_results/fid_scores.csv"
 detailed_csv="fid_results/detailed_results.csv"
 
-# Number of runs per iteration setting
+# Number of runs per mask function setting
 runs=5
 
+# Fix total iterations
+total_iter=7
+
+# Mask functions to test
+mask_functions=("linear" "cosine" "square")
+
 # Clear previous results
-echo "Total Iterations,FID Score,FID StdDev,Generation Time (s),Gen Time StdDev,Total Time (s),Total Time StdDev" > $csv_output
-echo "Total Iterations,Run,FID Score,Generation Time (s),Total Time (s)" > $detailed_csv
-echo "FID scores and timing for different --total-iter values (average of $runs runs):" > $output_file
+echo "Mask Function,FID Score,FID StdDev,Generation Time (s),Gen Time StdDev,Total Time (s),Total Time StdDev" > $csv_output
+echo "Mask Function,Run,FID Score,Generation Time (s),Total Time (s)" > $detailed_csv
+echo "FID scores and timing for different mask scheduling functions (average of $runs runs, total iterations: $total_iter):" > $output_file
 
 # Function to extract FID score from output
 extract_fid() {
@@ -56,22 +62,22 @@ calculate_stddev() {
     fi
 }
 
-# Run for iterations 1 to 30
-for iter in $(seq 1 10); do
-    echo "Running with --total-iter=$iter ($runs times)"
+# Run for each mask function
+for mask_func in "${mask_functions[@]}"; do
+    echo "Running with --mask-func=$mask_func ($runs times, total_iter=$total_iter)"
     
     # Arrays to store results
     fid_scores=()
     gen_times=()
     total_times=()
     
-    # Run multiple times for each iteration setting
+    # Run multiple times for each mask function setting
     for run in $(seq 1 $runs); do
         echo "  Run $run/$runs..."
         
-        # Run the inpainting script with current iteration value and measure time
+        # Run the inpainting script with current mask function and fixed total iterations
         start_gen_time=$(date +%s.%N)
-        output=$(python inpainting.py --total-iter=$iter 2>&1)
+        output=$(python inpainting.py --total-iter=$total_iter --mask-func=$mask_func 2>&1)
         end_gen_time=$(date +%s.%N)
         gen_time=$(echo "$end_gen_time - $start_gen_time" | bc)
         
@@ -94,12 +100,12 @@ for iter in $(seq 1 10); do
         total_times+=($total_time)
         
         # Log detailed results
-        echo "$iter,$run,$fid_score,$gen_time,$total_time" >> $detailed_csv
+        echo "$mask_func,$run,$fid_score,$gen_time,$total_time" >> $detailed_csv
         
-        # Optional: save the generated images for the last run of each iteration
+        # Optional: save the generated images for the last run of each mask function
         if [ $run -eq $runs ] && [ -d "test_results" ]; then
-            mkdir -p "fid_results/iter_${iter}_samples"
-            cp test_results/* "fid_results/iter_${iter}_samples/"
+            mkdir -p "fid_results/${mask_func}_samples"
+            cp test_results/* "fid_results/${mask_func}_samples/"
         fi
     done
     
@@ -122,64 +128,82 @@ for iter in $(seq 1 10); do
     stddev_total_time_fmt=$(printf "%.2f" $stddev_total_time)
     
     # Log the summarized results
-    echo "Total Iterations: $iter, FID: $avg_fid_fmt ± $stddev_fid_fmt, Generation Time: ${avg_gen_time_fmt}s ± ${stddev_gen_time_fmt}s, Total Time: ${avg_total_time_fmt}s ± ${stddev_total_time_fmt}s" >> $output_file
-    echo "$iter,$avg_fid_fmt,$stddev_fid_fmt,$avg_gen_time_fmt,$stddev_gen_time_fmt,$avg_total_time_fmt,$stddev_total_time_fmt" >> $csv_output
+    echo "Mask Function: $mask_func, FID: $avg_fid_fmt ± $stddev_fid_fmt, Generation Time: ${avg_gen_time_fmt}s ± ${stddev_gen_time_fmt}s, Total Time: ${avg_total_time_fmt}s ± ${stddev_total_time_fmt}s" >> $output_file
+    echo "$mask_func,$avg_fid_fmt,$stddev_fid_fmt,$avg_gen_time_fmt,$stddev_gen_time_fmt,$avg_total_time_fmt,$stddev_total_time_fmt" >> $csv_output
     
     # Also print to console
-    echo "Total Iterations: $iter, FID: $avg_fid_fmt ± $stddev_fid_fmt, Generation Time: ${avg_gen_time_fmt}s ± ${stddev_gen_time_fmt}s, Total Time: ${avg_total_time_fmt}s ± ${stddev_total_time_fmt}s"
+    echo "Mask Function: $mask_func, FID: $avg_fid_fmt ± $stddev_fid_fmt, Generation Time: ${avg_gen_time_fmt}s ± ${stddev_gen_time_fmt}s, Total Time: ${avg_total_time_fmt}s ± ${stddev_total_time_fmt}s"
 done
 
 echo "All tests completed. Results saved to $output_file and $csv_output"
 
-# Generate plots if gnuplot is available
+# Generate bar chart for mask functions if gnuplot is available
 if command -v gnuplot > /dev/null; then
     echo "Generating plots with gnuplot..."
     
-    # FID Score plot with error bars
+    # FID Score bar chart with error bars
     gnuplot <<EOF
     set terminal png size 800,600
-    set output "fid_results/fid_plot.png"
-    set title "FID Score vs. Total Iterations (Average of $runs runs)"
-    set xlabel "Total Iterations"
+    set output "fid_results/mask_func_fid_plot.png"
+    set title "FID Score by Mask Function (Average of $runs runs, Total Iterations: $total_iter)"
+    set xlabel "Mask Function"
     set ylabel "FID Score"
-    set grid
-    set key outside
+    set grid y
+    set style data histogram
+    set style histogram errorbars gap 2 lw 2
+    set style fill solid 0.5
+    set boxwidth 0.8
+    set xtics rotate by -45
+    set key off
     # Use column 2 for y values and column 3 for yerror
-    plot "$csv_output" using 1:2:3 with yerrorbars lw 2 pt 7 ps 1 title "FID Score"
+    plot "$csv_output" using 2:3:xtic(1) title "FID Score" lt rgb "#0060ad"
 EOF
 
-    # Generation Time plot with error bars
+    # Generation Time bar chart with error bars
     gnuplot <<EOF
     set terminal png size 800,600
-    set output "fid_results/generation_time_plot.png"
-    set title "Generation Time vs. Total Iterations (Average of $runs runs)"
-    set xlabel "Total Iterations"
+    set output "fid_results/mask_func_time_plot.png"
+    set title "Generation Time by Mask Function (Average of $runs runs, Total Iterations: $total_iter)"
+    set xlabel "Mask Function"
     set ylabel "Time (seconds)"
-    set grid
-    set key outside
+    set grid y
+    set style data histogram
+    set style histogram errorbars gap 2 lw 2
+    set style fill solid 0.5
+    set boxwidth 0.8
+    set xtics rotate by -45
+    set key off
     # Use column 4 for y values and column 5 for yerror
-    plot "$csv_output" using 1:4:5 with yerrorbars lw 2 pt 7 ps 1 title "Generation Time"
+    plot "$csv_output" using 4:5:xtic(1) title "Generation Time" lt rgb "#dd181f"
 EOF
 
-    # Combined plot with two y-axes and error bars
+    # Combined bar chart
     gnuplot <<EOF
-    set terminal png size 1000,600
-    set output "fid_results/combined_plot.png"
-    set title "FID Score and Generation Time vs. Total Iterations (Average of $runs runs)"
-    set xlabel "Total Iterations"
+    set terminal png size 1000,800
+    set output "fid_results/mask_func_combined_plot.png"
+    set multiplot layout 2,1 title "Mask Function Comparison (Total Iterations: $total_iter)"
+    
+    # FID Score subplot
+    set title "FID Score by Mask Function"
+    set xlabel ""
     set ylabel "FID Score"
-    set y2label "Time (seconds)"
-    set ytics nomirror
-    set y2tics
-    set grid
-    set key outside
+    set grid y
+    set style data histogram
+    set style histogram errorbars gap 2 lw 2
+    set style fill solid 0.5
+    set boxwidth 0.8
+    set xtics rotate by 0
+    set key off
+    plot "$csv_output" using 2:3:xtic(1) title "FID Score" lt rgb "#0060ad"
     
-    # Set different colors for the two plots
-    set style line 1 lc rgb '#0060ad' lt 1 lw 2 pt 7 ps 1   # blue
-    set style line 2 lc rgb '#dd181f' lt 1 lw 2 pt 5 ps 1   # red
+    # Generation Time subplot
+    set title "Generation Time by Mask Function"
+    set xlabel "Mask Function"
+    set ylabel "Time (seconds)"
+    set grid y
+    plot "$csv_output" using 4:5:xtic(1) title "Generation Time" lt rgb "#dd181f"
     
-    plot "$csv_output" using 1:2:3 with yerrorbars ls 1 title "FID Score" axis x1y1, \
-         "$csv_output" using 1:4:5 with yerrorbars ls 2 title "Generation Time" axis x1y2
+    unset multiplot
 EOF
 
     echo "Plots saved to fid_results directory"
