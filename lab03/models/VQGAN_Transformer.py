@@ -37,9 +37,6 @@ class MaskGit(nn.Module):
     def encode_to_z(self, x):
         codebook_mapping, codebook_indices, _ = self.vqgan.encode(x)
 
-        print(f"codebook_mapping shape: {codebook_mapping.shape}")
-        print(f"codebook_indices shape: {codebook_indices.shape}")
-
         return codebook_mapping, codebook_indices.reshape(codebook_mapping.shape[0], -1)
 
 # TODO2 step1-2:
