@@ -1,6 +1,7 @@
 import os
 import argparse
 import math
+import wandb
 import numpy as np
 import torch
 import torch.nn as nn
@@ -29,8 +30,14 @@ def Generate_PSNR(imgs1, imgs2, data_range=1.):
 
 
 def kl_criterion(mu, logvar, batch_size):
+    # Clamp logvar to prevent extreme values
+    logvar = torch.clamp(logvar, min=-20, max=20)
     KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-    KLD /= batch_size  
+
+    # Normalize by batch size and ALL feature dimensions
+    total_elements = batch_size * mu.shape[1] * mu.shape[2] * mu.shape[3]  # batch × 12 × 32 × 64
+    KLD /= total_elements
+    
     return KLD
 
 
@@ -41,7 +48,8 @@ class kl_annealing():
         self.ratio = args.kl_anneal_ratio
         self.current_epoch = current_epoch
         self.betas = self.frange_cycle_linear(args.num_epoch, start=0.0, stop=1.0, n_cycle=self.cycle, ratio=self.ratio)
-        self.beta = 0.0
+        self.beta = 1.0 if self.type == 'None' else 0.0
+        self.epoch_per_cycle = args.num_epoch / self.cycle
         
     def update(self):
         self.current_epoch += 1
@@ -88,10 +96,11 @@ class VAE_Model(nn.Module):
         self.Generator            = Generator(input_nc=args.D_out_dim, output_nc=3)
         
         self.optim      = optim.Adam(self.parameters(), lr=self.args.lr)
-        self.scheduler  = optim.lr_scheduler.MultiStepLR(self.optim, milestones=[2, 5], gamma=0.1)
+        # self.scheduler  = optim.lr_scheduler.MultiStepLR(self.optim, milestones=[2, 5], gamma=0.1)
+        self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optim, T_max=args.num_epoch)
         self.kl_annealing = kl_annealing(args, current_epoch=0)
         self.mse_criterion = nn.MSELoss()
-        self.current_epoch = 0
+        self.current_epoch = 1
         
         # Teacher forcing arguments
         self.tfr = args.tfr
@@ -118,39 +127,128 @@ class VAE_Model(nn.Module):
         return output, mu, logvar
 
     def training_stage(self):
+
         for i in range(self.args.num_epoch):
+            print(f"Epoch {self.current_epoch}/{self.args.num_epoch}")
             train_loader = self.train_dataloader()
             adapt_TeacherForcing = True if random.random() < self.tfr else False
             
-            for (imgs, labels) in (pbar := tqdm(train_loader, ncols=120)):
+            # Track metrics for the epoch
+            epoch_loss = 0
+            epoch_mse_loss = 0
+            epoch_kld_loss = 0
+            step_count = 0
+            
+            for (imgs, labels) in (pbar := tqdm(train_loader)):
                 imgs = imgs.to(self.args.device)
                 labels = labels.to(self.args.device)
-                loss = self.training_one_step(imgs, labels, adapt_TeacherForcing)
+                loss, mse_loss, kld_loss = self.training_one_step(imgs, labels, adapt_TeacherForcing)
+                
+                epoch_loss += loss.item()
+                epoch_mse_loss += mse_loss.item()
+                epoch_kld_loss += kld_loss.item()
+                step_count += 1
                 
                 beta = self.kl_annealing.get_beta()
                 if adapt_TeacherForcing:
-                    self.tqdm_bar('train [TeacherForcing: ON, {:.1f}], beta: {}'.format(self.tfr, beta), pbar, loss.detach().cpu(), lr=self.scheduler.get_last_lr()[0])
+                    self.tqdm_bar('train [TeacherForcing: ON, {:.1f}], beta: {:.3e}'.format(self.tfr, beta), pbar, loss.detach().cpu(), lr=self.scheduler.get_last_lr()[0])
                 else:
-                    self.tqdm_bar('train [TeacherForcing: OFF, {:.1f}], beta: {}'.format(self.tfr, beta), pbar, loss.detach().cpu(), lr=self.scheduler.get_last_lr()[0])
+                    self.tqdm_bar('train [TeacherForcing: OFF, {:.1f}], beta: {:.3e}'.format(self.tfr, beta), pbar, loss.detach().cpu(), lr=self.scheduler.get_last_lr()[0])
+            
+            # Calculate average metrics for the epoch
+            avg_loss = epoch_loss / max(1, step_count)
+            avg_mse_loss = epoch_mse_loss / max(1, step_count)
+            avg_kld_loss = epoch_kld_loss / max(1, step_count)
+            
+            # Log metrics to wandb
+            if self.args.use_wandb:
+                wandb.log({
+                    "train/loss": avg_loss,
+                    "train/mse_loss": avg_mse_loss,
+                    "train/kld_loss": avg_kld_loss,
+                    "train/beta": self.kl_annealing.get_beta(),
+                    "train/tfr": self.tfr,
+                    "train/lr": self.scheduler.get_last_lr()[0],
+                    "epoch": self.current_epoch,
+                })
             
             if self.current_epoch % self.args.per_save == 0:
                 self.save(os.path.join(self.args.save_root, f"epoch={self.current_epoch}.ckpt"))
+                
+                # Save model checkpoint to wandb
+                if self.args.use_wandb:
+                    wandb.save(os.path.join(self.args.save_root, f"epoch={self.current_epoch}.ckpt"))
                 
             self.eval()
             self.current_epoch += 1
             self.scheduler.step()
             self.teacher_forcing_ratio_update()
             self.kl_annealing.update()
+        
+        # Save the final model checkpoint
+        self.save(os.path.join(self.args.save_root, f"final_model.ckpt"))
+        if self.args.use_wandb:
+            wandb.save(os.path.join(self.args.save_root, f"final_model.ckpt"))
+        print("Training complete. Model saved.")
             
             
     @torch.no_grad()
     def eval(self):
         val_loader = self.val_dataloader()
-        for (img, label) in (pbar := tqdm(val_loader, ncols=120)):
+        
+        total_val_loss = 0.0
+        total_val_mse = 0.0
+        total_val_kld = 0.0
+        total_psnr = 0.0
+        valid_psnr_count = 0
+        step_count = 0
+        all_generated_frames = []
+        
+        for (img, label) in (pbar := tqdm(val_loader)):
             img = img.to(self.args.device)
             label = label.to(self.args.device)
-            loss = self.val_one_step(img, label)
+            loss, mse, kld, psnr, generated_frames = self.val_one_step(img, label)
+            
+            total_val_loss += loss.item()
+            total_val_mse += mse.item()
+            total_val_kld += kld.item()
+            if psnr is not None and psnr > 0:
+                total_psnr += psnr
+                valid_psnr_count += 1
+            step_count += 1
+            
+            # Save frames for visualization
+            if step_count == 1:  # Only keep the first sequence for visualization
+                all_generated_frames = generated_frames
+                
             self.tqdm_bar('val', pbar, loss.detach().cpu(), lr=self.scheduler.get_last_lr()[0])
+        
+        # Calculate average metrics
+        avg_val_loss = total_val_loss / max(1, step_count)
+        avg_val_mse = total_val_mse / max(1, step_count)
+        avg_val_kld = total_val_kld / max(1, step_count)
+        avg_psnr = total_psnr / max(1, valid_psnr_count) if valid_psnr_count > 0 else 0
+        
+        # Log validation metrics and media to wandb
+        if self.args.use_wandb:
+            log_dict = {
+                "val/loss": avg_val_loss,
+                "val/mse_loss": avg_val_mse,
+                "val/kld_loss": avg_val_kld,
+                "epoch": self.current_epoch,
+            }
+            
+            if avg_psnr > 0:
+                log_dict["val/psnr"] = avg_psnr
+                
+            # Log generated images if we're on a save epoch
+            if self.args.store_visualization and self.current_epoch % self.args.per_save == 0 and len(all_generated_frames) > 0:
+                # Create a GIF for wandb
+                gif_path = os.path.join(self.args.save_root, f"visualizations/epoch_{self.current_epoch}/val_seq.gif")
+                if os.path.exists(gif_path):
+                    log_dict["val/generated_sequence"] = wandb.Video(gif_path, fps=15, format="gif")
+                    
+            wandb.log(log_dict)
     
     def training_one_step(self, imgs, labels, adapt_TeacherForcing):
         assert imgs.shape[1] == self.train_vi_len, "Batch size must be equal to the video length"
@@ -173,8 +271,11 @@ class VAE_Model(nn.Module):
             output, mu, logvar = self.forward(prev_img, next_img, next_label)
             
             # Compute the loss
-            total_kld += kl_criterion(mu, logvar, batch_size)
-            total_mse += self.mse_criterion(output, next_img)
+            kld = kl_criterion(mu, logvar, batch_size)
+            mse = self.mse_criterion(output, next_img)
+            
+            total_kld += kld
+            total_mse += mse
 
             if adapt_TeacherForcing:
                 # Teacher forcing
@@ -183,12 +284,14 @@ class VAE_Model(nn.Module):
                 # Use the generated image as input for the next step
                 prev_img = output.detach()
         
-        loss = total_mse + self.kl_annealing.get_beta() * total_kld
+        loss = total_mse
+        if self.kl_annealing.get_beta() > 0:
+            loss += self.kl_annealing.get_beta() * total_kld
         self.optim.zero_grad()
         loss.backward()
         self.optimizer_step()
             
-        return loss
+        return loss, total_mse, total_kld
     
     def val_one_step(self, img, label):
         # Get the first frame as starting frame
@@ -223,6 +326,12 @@ class VAE_Model(nn.Module):
         # Combine losses with KL annealing
         loss = total_mse + self.kl_annealing.get_beta() * total_kld
         
+        avg_psnr = None
+        original_frames = [img[0, i].cpu() for i in range(self.val_vi_len)]
+        psnr_values = [Generate_PSNR(original_frames[i], generated_frames[i]) for i in range(1, self.val_vi_len)]
+        avg_psnr = sum(psnr_values) / len(psnr_values)
+            
+        print(f"Validation PSNR: {avg_psnr:.2f} dB")
         # Save visualization if enabled
         if self.args.store_visualization and self.current_epoch % self.args.per_save == 0:
             vis_dir = os.path.join(self.args.save_root, f"visualizations/epoch_{self.current_epoch}")
@@ -230,15 +339,33 @@ class VAE_Model(nn.Module):
             
             # Save as GIF
             self.make_gif(generated_frames, os.path.join(vis_dir, f"val_seq.gif"))
-            
-            # Calculate PSNR for validation
-            original_frames = [img[0, i].cpu() for i in range(self.val_vi_len)]
-            psnr_values = [Generate_PSNR(original_frames[i], generated_frames[i]) for i in range(1, self.val_vi_len)]
-            avg_psnr = sum(psnr_values) / len(psnr_values)
-            
-            print(f"Validation PSNR: {avg_psnr:.2f} dB")
-        
-        return loss
+                        
+            # Save sample frames as images for detailed inspection
+            if self.args.use_wandb and len(psnr_values) > 0:
+                # Save first, middle, and last frames for comparison
+                indices = [1, len(psnr_values) // 2, len(psnr_values) - 1]
+                for idx in indices:
+                    # Save original and generated frames side by side
+                    orig_img_path = os.path.join(vis_dir, f"orig_frame_{idx}.png")
+                    gen_img_path = os.path.join(vis_dir, f"gen_frame_{idx}.png")
+                    
+                    # Save original frame
+                    orig_frame = transforms.ToPILImage()(original_frames[idx])
+                    orig_frame.save(orig_img_path)
+                    
+                    # Save generated frame
+                    gen_frame = transforms.ToPILImage()(generated_frames[idx])
+                    gen_frame.save(gen_img_path)
+                    
+                    # Log images to wandb
+                    wandb.log({
+                        f"val/comparison_frame_{idx}": [
+                            wandb.Image(orig_img_path, caption=f"Original Frame {idx}"),
+                            wandb.Image(gen_img_path, caption=f"Generated Frame {idx}")
+                        ]
+                    })
+                    
+        return loss, total_mse, total_kld, avg_psnr, generated_frames
                 
     def make_gif(self, images_list, img_name):
         new_list = []
@@ -284,8 +411,8 @@ class VAE_Model(nn.Module):
             self.tfr = max(0.0, self.tfr - self.tfr_d_step)
             
     def tqdm_bar(self, mode, pbar, loss, lr):
-        pbar.set_description(f"({mode}) Epoch {self.current_epoch}, lr:{lr}" , refresh=False)
-        pbar.set_postfix(loss=float(loss), refresh=False)
+        pbar.set_description(f"({mode}) Epoch {self.current_epoch}, lr:{lr:.3e}" , refresh=False)
+        pbar.set_postfix(loss=f"{float(loss):.3e}", refresh=False)
         pbar.refresh()
         
     def save(self, path):
@@ -315,16 +442,30 @@ class VAE_Model(nn.Module):
         self.optim.step()
 
 
-
 def main(args):
     
     os.makedirs(args.save_root, exist_ok=True)
+    
+    # Initialize wandb
+    if not args.test and args.use_wandb:
+        # Set wandb run name if not provided
+        
+        wandb.init(
+            project=args.wandb_project,
+            config=vars(args)
+        )
+       
     model = VAE_Model(args).to(args.device)
+        
     model.load_checkpoint()
     if args.test:
         model.eval()
     else:
         model.training_stage()
+        
+    # Close wandb
+    if not args.test and args.use_wandb:
+        wandb.finish()
 
 
 
@@ -340,8 +481,8 @@ if __name__ == '__main__':
     parser.add_argument('--store_visualization',      action='store_true', help="If you want to see the result while training")
     parser.add_argument('--DR',            type=str, required=True,  help="Your Dataset Path")
     parser.add_argument('--save_root',     type=str, required=True,  help="The path to save your data")
-    parser.add_argument('--num_workers',   type=int, default=4)
-    parser.add_argument('--num_epoch',     type=int, default=70,     help="number of total epoch")
+    parser.add_argument('--num_workers',   type=int, default=16)
+    parser.add_argument('--num_epoch',     type=int, default=70   ,     help="number of total epoch")
     parser.add_argument('--per_save',      type=int, default=3,      help="Save checkpoint every seted epoch")
     parser.add_argument('--partial',       type=float, default=1.0,  help="Part of the training dataset to be trained")
     parser.add_argument('--train_vi_len',  type=int, default=16,     help="Training video length")
@@ -372,10 +513,12 @@ if __name__ == '__main__':
     # Kl annealing stratedy arguments
     parser.add_argument('--kl_anneal_type',     type=str, default='Cyclical',       help="", choices=["Cyclical", "Monotonic", "None"])
     parser.add_argument('--kl_anneal_cycle',    type=int, default=10,               help="")
-    parser.add_argument('--kl_anneal_ratio',    type=float, default=1,              help="")
+    parser.add_argument('--kl_anneal_ratio',    type=float, default=0.5,              help="")
     
-
-    
+    # WandB related arguments
+    parser.add_argument('--use_wandb',          action='store_true',         help="Whether to use Weights & Biases for experiment tracking")
+    parser.add_argument('--wandb_project',      type=str, default='NYCU-DL-lab04', help="WandB project name")
+    parser.add_argument('--wandb_run_name',     type=str, default=None,      help="WandB run name")
 
     args = parser.parse_args()
     

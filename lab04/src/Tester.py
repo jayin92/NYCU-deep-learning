@@ -44,7 +44,8 @@ class Dataset_Dance(torchData):
         self.img_folder = []
         self.label_folder = []
         
-        data_num = len(glob('./Demo_Test/*'))
+        data_num = len(glob(os.path.join(root , 'test/test_img/*')))
+        print(f"data_num: {data_num}")
         for i in range(data_num):
             self.img_folder.append(sorted(glob(os.path.join(root , f'test/test_img/{i}/*')), key=get_key))
             self.label_folder.append(sorted(glob(os.path.join(root , f'test/test_label/{i}/*')), key=get_key))
@@ -88,14 +89,25 @@ class Test_model(VAE_Model):
         self.batch_size = args.batch_size
         
         
-    def forward(self, img, label):
-        pass     
-            
+    def forward(self, img_prev, label_next):
+        img_prev_encoded = self.frame_transformation(img_prev).detach()
+        label_next_encoded = self.label_transformation(label_next)
+        
+        # Use a more consistent sampling approach
+        mu = torch.zeros(img_prev_encoded.shape[0], self.args.N_dim, 
+                        img_prev_encoded.shape[2], img_prev_encoded.shape[3]).to(self.args.device)
+        logvar = torch.zeros_like(mu)
+        z = mu + torch.exp(logvar / 2) * torch.randn_like(mu) * 0.5  # Reduced noise scale
+        
+        x = self.Decoder_Fusion.forward(img_prev_encoded, label_next_encoded, z)
+        output = self.Generator.forward(x)
+        return output
+
     @torch.no_grad()
     def eval(self):
         val_loader = self.val_dataloader()
         pred_seq_list = []
-        for idx, (img, label) in enumerate(tqdm(val_loader, ncols=80)):
+        for idx, (img, label) in enumerate(tqdm(val_loader)):
             img = img.to(self.args.device)
             label = label.to(self.args.device)
             pred_seq = self.val_one_step(img, label, idx)
@@ -116,15 +128,25 @@ class Test_model(VAE_Model):
         assert label.shape[0] == 630, "Testing pose seqence should be 630"
         assert img.shape[0] == 1, "Testing video seqence should be 1"
         
+        seq_len = label.shape[0]
+
         # decoded_frame_list is used to store the predicted frame seq
         # label_list is used to store the label seq
         # Both list will be used to make gif
         decoded_frame_list = [img[0].cpu()]
-        label_list = []
-
-        # TODO
-        raise NotImplementedError
-            
+        label_list = [label[0].cpu()]
+        prev_img = img[0]        
+        for i in range(1, seq_len):
+            next_label = label[i]
+            # Inside val_one_step loop
+            output = self.forward(prev_img, next_label)
+            # Replace any invalide values with 0.5
+            output[output != output] = 0.5
+            output[output > 1] = 1
+            output[output < 0] = 0
+            prev_img = output
+            decoded_frame_list.append(output.cpu())
+            label_list.append(next_label.cpu())
         
         # Please do not modify this part, it is used for visulization
         generated_frame = stack(decoded_frame_list).permute(1, 0, 2, 3, 4)
@@ -163,7 +185,8 @@ class Test_model(VAE_Model):
     def load_checkpoint(self):
         if self.args.ckpt_path != None:
             checkpoint = torch.load(self.args.ckpt_path)
-            self.load_state_dict(checkpoint['state_dict'], strict=True) 
+            self.load_state_dict(checkpoint['state_dict'], strict=True)
+            print(f"Load checkpoint from {self.args.ckpt_path}")
 
 
 
@@ -173,9 +196,6 @@ def main(args):
     model = Test_model(args).to(args.device)
     model.load_checkpoint()
     model.eval()
-
-
-
 
 
 if __name__ == '__main__':
