@@ -1,0 +1,194 @@
+\documentclass[a4paper]{article}
+\usepackage{fontspec}   %加這個就可以設定字體
+\usepackage{xeCJK}       %讓中英文字體分開設置
+\usepackage{indentfirst}
+\usepackage{listings}
+\usepackage[newfloat]{minted}
+\usepackage{float}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{fancyhdr}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{multirow}
+\usepackage[dvipsnames]{xcolor}
+\usepackage{graphicx}
+\usepackage{tabularx}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{pifont}
+\usepackage{amssymb}
+\usepackage[backend=biber]{biblatex}
+\addbibresource{main.bib}
+
+
+\usepackage{pdftexcmds}
+\usepackage{catchfile}
+\usepackage{ifluatex}
+\usepackage{ifplatform}
+
+\usepackage[breakable, listings, skins, minted]{tcolorbox}
+\usepackage{etoolbox}
+\setminted{fontsize=\footnotesize}
+\renewtcblisting{minted}{%
+    listing engine=minted,
+    minted language=python,
+    listing only,
+    breakable,
+    enhanced,
+    minted options = {
+        linenos, 
+        breaklines=true, 
+        breakbefore=., 
+        % fontsize=\footnotesize, 
+        numbersep=2mm
+    },
+    overlay={%
+        \begin{tcbclipinterior}
+            \fill[gray!25] (frame.south west) rectangle ([xshift=4mm]frame.north west);
+        \end{tcbclipinterior}
+    }   
+}
+
+\usepackage[
+top=1.5cm,
+bottom=0.75cm,
+left=1.5cm,
+right=1.5cm,
+includehead,includefoot,
+heightrounded, % to avoid spurious underfull messages
+]{geometry} 
+
+\newenvironment{code}{\captionsetup{type=listing}}{}
+\SetupFloatingEnvironment{listing}{name=Code}
+
+
+
+\title{Deep Learning Additional Homework - Mamba Discretization}
+\author{110550088 李杰穎}
+\date{\today}
+
+
+\setCJKmainfont{Noto Serif TC}
+
+
+
+\ifwindows
+\setmonofont[Mapping=tex-text]{Consolas}
+\fi
+
+\XeTeXlinebreaklocale "zh"             %這兩行一定要加，中文才能自動換行
+\XeTeXlinebreakskip = 0pt plus 1pt     %這兩行一定要加，中文才能自動換行
+
+\newcommand*{\dif}{\mathop{}\!\mathrm{d}}
+
+\begin{document}
+\maketitle
+
+\section{Introduction}
+
+Mamba~\cite{gu2023mamba} is a ground-breaking state space model (SSM) published in 2023. Developed by researchers Albert Gu and Tri Dao, the model introduces a novel approach to sequence modeling that addresses key limitations in existing transformer and state space architectures. Unlike traditional transformer models that struggle with long-range dependencies and computational efficiency, Mamba offers a linear-time sequence modeling technique with selective state spaces. The model demonstrates remarkable performance across various tasks, challenging the dominance of attention-based architectures by providing a more efficient alternative for processing sequential data. By selectively processing information and maintaining a compact state representation, Mamba represents a significant advancement in the field of machine learning and neural network design.
+
+Compared with Structured State Space sequence model (S4)~\cite{gu2021efficiently}, Mamba introduces a selective state space mechanism with a linear-time complexity, enabling more efficient and dynamic processing of sequential data. While S4 uses a uniform continuous-time state space model with quadratic computational complexity, Mamba employs a selective scanning algorithm that can dynamically focus on relevant parts of the input sequence. This approach allows Mamba to learn which information is most important, providing a more adaptable and computationally efficient alternative to both S4 and traditional transformer architectures. The model achieves this through a novel hardware-friendly design with fused kernels, making it particularly effective for long-sequence modeling tasks and demonstrating significant improvements in both computational efficiency and model performance.
+
+In this homework, we aim to derive the discretization process in the Structured State Space model, including Mamaba~\cite{gu2023mamba} and S4~\cite{gu2021efficiently}.
+
+\section{Discretization}
+
+The blog post, titled ``Structured State Spaces: Combining Continuous-Time, Recurrent, and Convolutional Models''~\cite{gu2022structuredstatespaces}, provides a comprehensive overview of the structure state space model. In this blog post, it mentions that why discretization is a crucial step for the state space model. As in real world applications, we can only obtain discrete data, and the discretization process is a key step to convert continuous-time state space models into discrete-time models.
+
+As described in the original Mamba~\cite{gu2023mamba} paper, the discretization process turn continuous parameters, $A$, $B$ and $\Delta$ into discrete-time parameters, $\bar{A}$ and $\bar{B}$. Given the state space model, the continuous-time state space model is defined as follows:
+\begin{align}
+    \frac{\dif h(t)}{\dif t} &= Ah(t) + Bx(t) \\
+    y(t) &= Ch(t)
+\end{align}
+
+The discretization process for zero-order hold is defined as follows:
+\begin{align}
+    \bar{A} &= \exp(\Delta A) \\
+    \bar{B} &= (\Delta A)^{-1}(\exp(\Delta A) - I) \cdot \Delta B
+\end{align}
+
+After the discretization process, we can obtain the discrete-time state space model:
+\begin{align}
+    h_{t} &= \bar{A}h_{t-1} + \bar{B}x_t \, , \\
+    y_t &= Ch_t \, ,
+\end{align}
+where $h_t$ is the hidden state at time step $t$, $x_t$ is the input at time step $t$, and $y_t$ is the output at time step $t$. The parameters $\bar{A}$ and $\bar{B}$ are the discretized versions of the continuous-time parameters $A$ and $B$, respectively. The parameter $\Delta$ is the time interval between two consecutive time steps.
+
+Now, we prove the above discretization process. The discretization process is based on the zero-order hold (ZOH) method, which is a common technique used to convert continuous-time systems into discrete-time systems. The ZOH method assumes that the input signal is held constant over each sampling interval, which allows us to derive the discrete-time state space model from the continuous-time state space model.
+The ZOH method can be derived from the following equations:
+\begin{align}
+    h(t) &= \exp(At)h(0) + \int_0^t \exp(A(t-\tau))B x(\tau) \dif \tau \\
+    y(t) &= Ch(t)
+\end{align}
+where $h(0)$ is the initial state at time $t=0$, and $x(\tau)$ is the input signal at time $\tau$. The first term in the equation represents the state evolution due to the initial state, while the second term represents the contribution of the input signal to the state evolution.
+
+To derive the discrete-time state space model\footnote{The derivation is referenced from \cite{wikipedia_discretization}}, we can sample the continuous-time state space model at discrete time steps. Let $t_k = k\Delta$ be the discrete time steps, where $k$ is an integer and $\Delta$ is the sampling interval. We can rewrite the continuous-time state space model as follows:
+\begin{equation}
+    \label{eq:discrete_time_state_space}
+    h'(t) = Ah(t) + Bx(t).
+\end{equation}
+
+We know that:
+\begin{equation}
+    \frac{\dif}{\dif t} e^{At} = A e^{At} = e^{At} A.
+\end{equation}
+
+We can rewrite \autoref{eq:discrete_time_state_space} as:
+\begin{align}
+    e^{-At} h'(t) &= e^{-At} Ah(t) + e^{-At} Bx(t) \\
+    e^{-At} h'(t) - A e^{-At} h(t) &= e^{-At} Bx(t) \\
+    \frac{\dif}{\dif t} (e^{-At} h(t)) &= e^{-At} Bx(t)
+\end{align}
+and by integrating both sides, we have:
+\begin{align}
+    e^{-At} h(t) &= h(0) + \int_0^t e^{-A\tau} B x(\tau) \dif \tau \\
+    h(t) &= e^{At} h(0) + \int_0^t e^{A(t-\tau)} B x(\tau) \dif \tau \label{eq:discrete_time_state_space_integral}
+\end{align}
+
+\autoref{eq:discrete_time_state_space_integral} is the analytical solution to the continuous model. 
+
+Next, we want to discretize the continuous-time state space model. We can sample the continuous-time state space model at discrete time steps. We denote $h_k = h(k\Delta)$, $x_k = x(k\Delta)$, where $k$ is an integer and $\Delta$ is the sample interval. We can rewrite \autoref{eq:discrete_time_state_space_integral} as:
+\begin{align}
+    h_k &= h(k\Delta) = e^{A(k\Delta)} h(0) + \int_0^{k\Delta} e^{A(k\Delta-\tau)} B x(\tau) \dif \tau
+\end{align}
+And also we can rewrite $h_{k+1}$ as:
+\begin{align}
+    h_{k+1} &= h((k+1)\Delta) = e^{A((k+1)\Delta)} h(0) + \int_0^{(k+1)\Delta} e^{A((k+1)\Delta-\tau)} B x(\tau) \dif \tau \\ 
+    &= e^{Ak\Delta} e^{A\Delta} h(0) + \int_0^{k\Delta} e^{A((k+1)\Delta-\tau)} B x(\tau) \dif \tau + \int_{k\Delta}^{(k+1)\Delta} e^{A((k+1)\Delta-\tau)} B x(\tau) \dif \tau  \\
+    &= e^{Ak\Delta} e^{A\Delta} h(0) + e^{A\Delta} \int_0^{k\Delta} e^{A(k\Delta-\tau)} B x(\tau) \dif \tau + \int_{k\Delta}^{(k+1)\Delta} e^{A((k+1)\Delta-\tau)} B x(\tau) \dif \tau  \\
+    &= e^{A\Delta} \left[e^{Ak\Delta} h(0) + \int_0^{k\Delta} e^{A(k\Delta-\tau)} B x(\tau) \dif \tau\right] + \int_{k\Delta}^{(k+1)\Delta} e^{A((k+1)\Delta-\tau)} B x(\tau) \dif \tau  \\
+    &= e^{A\Delta} h_k + \int_{k\Delta}^{(k+1)\Delta} e^{A((k+1)\Delta-\tau)} B x(\tau) \dif \tau \label{eq:discrete_time_state_space_integral_k}
+\end{align}
+
+Now, let's focus on the integral part. By the assumption of zero-order hold, we can assume that $x(\tau)$ is constant over the interval $[k\Delta, (k+1)\Delta]$\footnote{We take the right value $x_{k+1}$ in order to match the original derivation.}. Therefore, we can rewrite the integral as:
+\begin{align}
+    \int_{k\Delta}^{(k+1)\Delta} e^{A((k+1)\Delta-\tau)} B x(\tau) \dif \tau &= \int_{k\Delta}^{(k+1)\Delta} e^{A((k+1)\Delta-\tau)} B x_{k+1} \dif \tau \\
+    &= B x_{k+1} \int_{k\Delta}^{(k+1)\Delta} e^{A((k\Delta+\Delta-\tau)} \dif \tau
+\end{align}
+
+Let $v(\tau) = k\Delta + \Delta - \tau$, we know that $\dif v = - \dif \tau$. Therefore, we have:
+\begin{align}
+    B x_{k+1} \int_{k\Delta}^{(k+1)\Delta} e^{A((k\Delta+\Delta-\tau)} \dif \tau &= - B x_{k+1} \int_{\Delta}^{0} e^{A v(\tau)} \dif v(\tau) \\
+    &= B x_{k+1} \int_{0}^{\Delta} e^{A v(\tau)} \dif v(\tau) \\
+    &= A^{-1} \left[e^{A v}\right]_{0}^{\Delta} B x_{k+1} \\
+    &= A^{-1} \left[e^{A \Delta} - I\right] B x_{k+1} \\
+    &= \frac{A^{-1}}{\Delta} \left[e^{A \Delta} - I\right] B x_{k+1} \cdot \Delta \\
+    &= (A\Delta)^{-1} \left[\exp(A \Delta) - I\right] (B\Delta) x_{k+1}. 
+\end{align}
+
+By rewriting \autoref{eq:discrete_time_state_space_integral_k} with the above integral, we have:
+\begin{equation}
+    h_{k+1} = \exp(A\Delta) h_k + (A\Delta)^{-1} \left[\exp(A \Delta) - I\right] (B\Delta) x_{k+1}.
+\end{equation}
+Thus, we prove that the discretization process is:
+\begin{align}
+    \bar{A} &= \exp(\Delta A) \\
+    \bar{B} &= (\Delta A)^{-1} \left[\exp(\Delta A) - I\right] \cdot \Delta B
+\end{align}
+where $\bar{A}$ and $\bar{B}$ are the discretized versions of the continuous-time parameters $A$ and $B$, respectively. The parameter $\Delta$ is the time interval between two consecutive time steps.
+
+\printbibliography
+\end{document}
