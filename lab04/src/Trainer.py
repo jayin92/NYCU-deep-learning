@@ -31,13 +31,13 @@ def Generate_PSNR(imgs1, imgs2, data_range=1.):
 
 def kl_criterion(mu, logvar, batch_size):
     # Clamp logvar to prevent extreme values
-    logvar = torch.clamp(logvar, min=-20, max=20)
+    logvar = torch.clamp(logvar, min=-10, max=10)
     KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
 
     # Normalize by batch size and ALL feature dimensions
     total_elements = batch_size * mu.shape[1] * mu.shape[2] * mu.shape[3]  # batch × 12 × 32 × 64
     KLD /= total_elements
-    
+
     return KLD
 
 
@@ -47,14 +47,18 @@ class kl_annealing():
         self.cycle = args.kl_anneal_cycle
         self.ratio = args.kl_anneal_ratio
         self.current_epoch = current_epoch
+        self.current_epoch -= 1  # Because update() will increment it
         self.betas = self.frange_cycle_linear(args.num_epoch, start=0.0, stop=1.0, n_cycle=self.cycle, ratio=self.ratio)
-        self.beta = 1.0 if self.type == 'None' else 0.0
+        self.update()
         self.epoch_per_cycle = args.num_epoch / self.cycle
         
     def update(self):
         self.current_epoch += 1
         if self.type == 'Cyclical':
-            beta = self.betas[self.current_epoch]
+            try:
+                beta = self.betas[self.current_epoch]
+            except:
+                beta = 1.0
         elif self.type == 'Monotonic':
             beta = min(1.0, self.current_epoch / self.epoch_per_cycle)
         elif self.type == 'None':
@@ -75,7 +79,8 @@ class kl_annealing():
             else:
                 beta = stop
             betas.append(beta)
-
+        
+        betas.append(stop)
         return betas
 
 
@@ -95,9 +100,15 @@ class VAE_Model(nn.Module):
         # Generative model
         self.Generator            = Generator(input_nc=args.D_out_dim, output_nc=3)
         
-        self.optim      = optim.Adam(self.parameters(), lr=self.args.lr)
+        if args.optim == "Adam":
+            self.optim      = optim.Adam(self.parameters(), lr=self.args.lr)
+        elif args.optim == "AdamW":
+            self.optim      = optim.AdamW(self.parameters(), lr=self.args.lr)
+        else:
+            raise ValueError("Optimizer not supported")
         # self.scheduler  = optim.lr_scheduler.MultiStepLR(self.optim, milestones=[2, 5], gamma=0.1)
-        self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optim, T_max=args.num_epoch)
+        self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optim, T_max=args.num_epoch, eta_min=args.lr_min)
+        
         self.kl_annealing = kl_annealing(args, current_epoch=0)
         self.mse_criterion = nn.MSELoss()
         self.current_epoch = 1
@@ -128,7 +139,7 @@ class VAE_Model(nn.Module):
 
     def training_stage(self):
 
-        for i in range(self.args.num_epoch):
+        for i in range(self.args.num_epoch - self.current_epoch + 1):
             print(f"Epoch {self.current_epoch}/{self.args.num_epoch}")
             train_loader = self.train_dataloader()
             adapt_TeacherForcing = True if random.random() < self.tfr else False
@@ -269,6 +280,9 @@ class VAE_Model(nn.Module):
             
             # Forward pass
             output, mu, logvar = self.forward(prev_img, next_img, next_label)
+            output = output.clamp(0, 1)  # Clamp output to [0, 1]
+            # Replace nan and inf with 0.5
+            output[output != output] = 0.5
             
             # Compute the loss
             kld = kl_criterion(mu, logvar, batch_size)
@@ -309,6 +323,9 @@ class VAE_Model(nn.Module):
             
             # Forward pass
             output, mu, logvar = self.forward(prev_img, next_img, next_label)
+            output = output.clamp(0, 1)  # Clamp output to [0, 1]
+            # Replace nan and inf with 0.5
+            output[output != output] = 0.5
             
             # Compute losses
             kld = kl_criterion(mu, logvar, 1)
@@ -474,6 +491,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(add_help=True)
     parser.add_argument('--batch_size',    type=int,    default=2)
     parser.add_argument('--lr',            type=float,  default=0.001,     help="initial learning rate")
+    parser.add_argument('--lr_min',            type=float,  default=0.0,     help="final learning rate")
     parser.add_argument('--device',        type=str, choices=["cuda", "cpu"], default="cuda")
     parser.add_argument('--optim',         type=str, choices=["Adam", "AdamW"], default="Adam")
     parser.add_argument('--gpu',           type=int, default=1)
@@ -481,7 +499,7 @@ if __name__ == '__main__':
     parser.add_argument('--store_visualization',      action='store_true', help="If you want to see the result while training")
     parser.add_argument('--DR',            type=str, required=True,  help="Your Dataset Path")
     parser.add_argument('--save_root',     type=str, required=True,  help="The path to save your data")
-    parser.add_argument('--num_workers',   type=int, default=16)
+    parser.add_argument('--num_workers',   type=int, default=32)
     parser.add_argument('--num_epoch',     type=int, default=70   ,     help="number of total epoch")
     parser.add_argument('--per_save',      type=int, default=3,      help="Save checkpoint every seted epoch")
     parser.add_argument('--partial',       type=float, default=1.0,  help="Part of the training dataset to be trained")
