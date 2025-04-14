@@ -1,0 +1,132 @@
+\documentclass[twocolumn,a4paper]{article}
+\usepackage{fontspec}   %加這個就可以設定字體
+\usepackage{xeCJK}       %讓中英文字體分開設置
+\usepackage{indentfirst}
+\usepackage{listings}
+\usepackage[newfloat]{minted}
+\usepackage{float}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{fancyhdr}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{multirow}
+\usepackage[dvipsnames]{xcolor}
+\usepackage{graphicx}
+\usepackage{tabularx}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{pifont}
+\usepackage{amssymb}
+\usepackage[backend=biber]{biblatex}
+\addbibresource{main.bib}
+
+
+\usepackage{pdftexcmds}
+\usepackage{catchfile}
+\usepackage{ifluatex}
+\usepackage{ifplatform}
+
+\usepackage[breakable, listings, skins, minted]{tcolorbox}
+\usepackage{etoolbox}
+\setminted{fontsize=\footnotesize}
+\renewtcblisting{minted}{%
+    listing engine=minted,
+    minted language=python,
+    listing only,
+    breakable,
+    enhanced,
+    minted options = {
+        linenos, 
+        breaklines=true, 
+        breakbefore=., 
+        % fontsize=\footnotesize, 
+        numbersep=2mm
+    },
+    overlay={%
+        \begin{tcbclipinterior}
+            \fill[gray!25] (frame.south west) rectangle ([xshift=4mm]frame.north west);
+        \end{tcbclipinterior}
+    }   
+}
+
+\usepackage[
+top=1.5cm,
+bottom=0.75cm,
+left=1.5cm,
+right=1.5cm,
+includehead,includefoot,
+heightrounded, % to avoid spurious underfull messages
+]{geometry} 
+
+\newenvironment{code}{\captionsetup{type=listing}}{}
+\SetupFloatingEnvironment{listing}{name=Code}
+
+
+
+\title{Deep Learning Lab 4 - Conditional VAE for Video Prediction}
+\author{110550088 李杰穎}
+\date{\today}
+
+
+\setCJKmainfont{Noto Serif TC}
+
+
+
+\ifwindows
+\setmonofont[Mapping=tex-text]{Consolas}
+\fi
+
+\XeTeXlinebreaklocale "zh"             %這兩行一定要加，中文才能自動換行
+\XeTeXlinebreakskip = 0pt plus 1pt     %這兩行一定要加，中文才能自動換行
+
+\newcommand*{\dif}{\mathop{}\!\mathrm{d}}
+
+
+%\setlength{\parindent}{0em}
+%\setlength{\parskip}{2em}
+%\renewcommand{\baselinestretch}{1.25}
+%\setlength{\droptitle}{-7.5em}   % This is your set screw
+%\setlength{\columnsep}{2em}
+
+\begin{document}
+\maketitle
+
+\section{Introduction}
+
+In this homework, we aim to write and train a variational autoencoder (VAE) to predict the next video frame with given previous frame and next pose image. I train the network with different KL annealing scheduling, including monotonic, cyclical and no annealing. I found that cyclical annealing can lead to better validation PSNR. This is coincide with findings in \cite{fu2019cyclical}. The teacher forcing strategy also stabilize the early training process. I achieve ... of PSNR on validation set and ... of PNSR on public test set.
+
+
+\section{Implementation Details}
+
+\subsection{Training protocol}
+
+\subsection{Testing protocol}
+
+\subsection{Reparameterization tricks}
+
+When training VAE, in order to make the gradient can be back-propagate to the encoder properly, we need to employ reparameterization trick. Specifically, instead of directly sample latent vector $z$ from $\mathcal{N}(\mu, \sigma^2)$, we first sample a noise $n$ from standard normal distribution $\mathcal{N}(0, 1)$ then we scale and shift the noise $n$ with $z = \mu + n \sigma^2$. In this way, the gradient can be flowed back to the encoder, whose output is $\mu$ and $\sigma^2$. Furthermore, instead of directly output $\sigma^2$, we often  make the encoder output the log variance, $\log \sigma^2$, to stabilize the training process. After this modification, the reparameterization becomes $z = \mu + n\exp(\frac{\log \sigma^2}{2})$. The code implementation is as follow:
+
+\begin{code}
+\captionof{listing}{\textbf{Implementation of VAE reparameterization trick.}}
+\label{code:repara}
+\begin{minted}
+def reparameterize(self, mu, logvar):
+    return mu + torch.exp(logvar / 2) * torch.randn_like(mu)
+\end{minted}
+\end{code}
+
+\subsection{Teacher forcing strategy}
+
+The teacher forcing strategy first appears in the fields of reinforcement learning (RL). When the model are asked to generate a sequential data, we often take the previous output as the input to generate the next output. However, when the model's performance are not good, the error will accumulate and thus harming the training process. Therefore, instead of using the previous output as input, teacher forcing injecting the ground truth of previous step as the next input. In this way, we can stabilize the model training, avoid the degenerate causing by error accumulation. However, if we always employ teacher forcing, the model wouldn't know how to fix the accumulated error, thus, after the model is capable to output reasonable output, we can turn off teacher forcing to make the model more robust. Thus increasing the testing performance where ground truth data is not available.
+
+\subsection{KL annealing ratio}
+
+
+\section{Analysis \& Discussion}
+
+\printbibliography
+
+
+\end{document}
