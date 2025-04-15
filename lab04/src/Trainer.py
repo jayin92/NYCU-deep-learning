@@ -49,8 +49,8 @@ class kl_annealing():
         self.current_epoch = current_epoch
         self.current_epoch -= 1  # Because update() will increment it
         self.betas = self.frange_cycle_linear(args.num_epoch, start=0.0, stop=1.0, n_cycle=self.cycle, ratio=self.ratio)
-        self.update()
         self.epoch_per_cycle = args.num_epoch / self.cycle
+        self.update()
         
     def update(self):
         self.current_epoch += 1
@@ -485,59 +485,60 @@ def main(args):
         wandb.finish()
 
 
+def get_parser():
+    parser = argparse.ArgumentParser(add_help=True)
+    
+    parser.add_argument('--batch_size', type=int, default=2)
+    parser.add_argument('--lr', type=float, default=0.001)
+    parser.add_argument('--lr_min', type=float, default=0.0)
+    parser.add_argument('--device', type=str, choices=["cuda", "cpu"], default="cuda")
+    parser.add_argument('--optim', type=str, choices=["Adam", "AdamW"], default="Adam")
+    parser.add_argument('--gpu', type=int, default=1)
+    parser.add_argument('--test', action='store_true')
+    parser.add_argument('--store_visualization', action='store_true')
+    parser.add_argument('--DR', type=str, required=True)
+    parser.add_argument('--save_root', type=str, required=True)
+    parser.add_argument('--num_workers', type=int, default=32)
+    parser.add_argument('--num_epoch', type=int, default=70)
+    parser.add_argument('--per_save', type=int, default=3)
+    parser.add_argument('--partial', type=float, default=1.0)
+    parser.add_argument('--train_vi_len', type=int, default=16)
+    parser.add_argument('--val_vi_len', type=int, default=630)
+    parser.add_argument('--frame_H', type=int, default=32)
+    parser.add_argument('--frame_W', type=int, default=64)
 
+    # Module params
+    parser.add_argument('--F_dim', type=int, default=128)
+    parser.add_argument('--L_dim', type=int, default=32)
+    parser.add_argument('--N_dim', type=int, default=12)
+    parser.add_argument('--D_out_dim', type=int, default=192)
+
+    # Teacher Forcing
+    parser.add_argument('--tfr', type=float, default=1.0)
+    parser.add_argument('--tfr_sde', type=int, default=10)
+    parser.add_argument('--tfr_d_step', type=float, default=0.1)
+
+    # Checkpoint
+    parser.add_argument('--ckpt_path', type=str, default=None)
+
+    # Training strategy
+    parser.add_argument('--fast_train', action='store_true')
+    parser.add_argument('--fast_partial', type=float, default=0.4)
+    parser.add_argument('--fast_train_epoch', type=int, default=5)
+
+    # KL annealing
+    parser.add_argument('--kl_anneal_type', type=str, default='Cyclical', choices=["Cyclical", "Monotonic", "None"])
+    parser.add_argument('--kl_anneal_cycle', type=int, default=10)
+    parser.add_argument('--kl_anneal_ratio', type=float, default=0.5)
+
+    # Wandb
+    parser.add_argument('--use_wandb', action='store_true')
+    parser.add_argument('--wandb_project', type=str, default='NYCU-DL-lab04')
+    parser.add_argument('--wandb_run_name', type=str, default=None)
+
+    return parser
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(add_help=True)
-    parser.add_argument('--batch_size',    type=int,    default=2)
-    parser.add_argument('--lr',            type=float,  default=0.001,     help="initial learning rate")
-    parser.add_argument('--lr_min',            type=float,  default=0.0,     help="final learning rate")
-    parser.add_argument('--device',        type=str, choices=["cuda", "cpu"], default="cuda")
-    parser.add_argument('--optim',         type=str, choices=["Adam", "AdamW"], default="Adam")
-    parser.add_argument('--gpu',           type=int, default=1)
-    parser.add_argument('--test',          action='store_true')
-    parser.add_argument('--store_visualization',      action='store_true', help="If you want to see the result while training")
-    parser.add_argument('--DR',            type=str, required=True,  help="Your Dataset Path")
-    parser.add_argument('--save_root',     type=str, required=True,  help="The path to save your data")
-    parser.add_argument('--num_workers',   type=int, default=32)
-    parser.add_argument('--num_epoch',     type=int, default=70   ,     help="number of total epoch")
-    parser.add_argument('--per_save',      type=int, default=3,      help="Save checkpoint every seted epoch")
-    parser.add_argument('--partial',       type=float, default=1.0,  help="Part of the training dataset to be trained")
-    parser.add_argument('--train_vi_len',  type=int, default=16,     help="Training video length")
-    parser.add_argument('--val_vi_len',    type=int, default=630,    help="valdation video length")
-    parser.add_argument('--frame_H',       type=int, default=32,     help="Height input image to be resize")
-    parser.add_argument('--frame_W',       type=int, default=64,     help="Width input image to be resize")
-    
-    
-    # Module parameters setting
-    parser.add_argument('--F_dim',         type=int, default=128,    help="Dimension of feature human frame")
-    parser.add_argument('--L_dim',         type=int, default=32,     help="Dimension of feature label frame")
-    parser.add_argument('--N_dim',         type=int, default=12,     help="Dimension of the Noise")
-    parser.add_argument('--D_out_dim',     type=int, default=192,    help="Dimension of the output in Decoder_Fusion")
-    
-    # Teacher Forcing strategy
-    parser.add_argument('--tfr',           type=float, default=1.0,  help="The initial teacher forcing ratio")
-    parser.add_argument('--tfr_sde',       type=int,   default=10,   help="The epoch that teacher forcing ratio start to decay")
-    parser.add_argument('--tfr_d_step',    type=float, default=0.1,  help="Decay step that teacher forcing ratio adopted")
-    
-    # Checkpoint path
-    parser.add_argument('--ckpt_path',     type=str,    default=None,help="The path of your checkpoints")   
-    
-    # Training Strategy
-    parser.add_argument('--fast_train',         action='store_true')
-    parser.add_argument('--fast_partial',       type=float, default=0.4,    help="Use part of the training data to fasten the convergence")
-    parser.add_argument('--fast_train_epoch',   type=int, default=5,        help="Number of epoch to use fast train mode")
-    
-    # Kl annealing stratedy arguments
-    parser.add_argument('--kl_anneal_type',     type=str, default='Cyclical',       help="", choices=["Cyclical", "Monotonic", "None"])
-    parser.add_argument('--kl_anneal_cycle',    type=int, default=10,               help="")
-    parser.add_argument('--kl_anneal_ratio',    type=float, default=0.5,              help="")
-    
-    # WandB related arguments
-    parser.add_argument('--use_wandb',          action='store_true',         help="Whether to use Weights & Biases for experiment tracking")
-    parser.add_argument('--wandb_project',      type=str, default='NYCU-DL-lab04', help="WandB project name")
-    parser.add_argument('--wandb_run_name',     type=str, default=None,      help="WandB run name")
-
+    parser = get_parser()
     args = parser.parse_args()
-    
     main(args)
