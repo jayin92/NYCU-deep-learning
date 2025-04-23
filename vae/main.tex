@@ -1,0 +1,120 @@
+\documentclass[a4paper]{article}
+\usepackage{fontspec}   %加這個就可以設定字體
+\usepackage{xeCJK}       %讓中英文字體分開設置
+\usepackage{indentfirst}
+\usepackage{listings}
+\usepackage[newfloat]{minted}
+\usepackage{float}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{fancyhdr}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{multirow}
+\usepackage[dvipsnames]{xcolor}
+\usepackage{graphicx}
+\usepackage{tabularx}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{pifont}
+\usepackage{amssymb}
+
+\usepackage{pdftexcmds}
+\usepackage{catchfile}
+\usepackage{ifluatex}
+\usepackage{ifplatform}
+
+\usepackage[breakable, listings, skins, minted]{tcolorbox}
+\usepackage{etoolbox}
+\setminted{fontsize=\footnotesize}
+\renewtcblisting{minted}{%
+    listing engine=minted,
+    minted language=python,
+    listing only,
+    breakable,
+    enhanced,
+    minted options = {
+        linenos, 
+        breaklines=true, 
+        breakbefore=., 
+        % fontsize=\footnotesize, 
+        numbersep=2mm
+    },
+    overlay={%
+        \begin{tcbclipinterior}
+            \fill[gray!25] (frame.south west) rectangle ([xshift=4mm]frame.north west);
+        \end{tcbclipinterior}
+    }   
+}
+
+\usepackage[
+top=1.5cm,
+bottom=0.75cm,
+left=1.5cm,
+right=1.5cm,
+includehead,includefoot,
+heightrounded, % to avoid spurious underfull messages
+]{geometry} 
+
+\newenvironment{code}{\captionsetup{type=listing}}{}
+\SetupFloatingEnvironment{listing}{name=Code}
+
+
+
+\title{Deep Learning Additional Homework - Variational Autoencoder}
+\author{110550088 李杰穎}
+\date{\today}
+
+
+\setCJKmainfont{Noto Serif TC}
+
+
+
+\ifwindows
+\setmonofont[Mapping=tex-text]{Consolas}
+\fi
+
+\XeTeXlinebreaklocale "zh"             %這兩行一定要加，中文才能自動換行
+\XeTeXlinebreakskip = 0pt plus 1pt     %這兩行一定要加，中文才能自動換行
+
+\newcommand*{\dif}{\mathop{}\!\mathrm{d}}
+
+\begin{document}
+\maketitle
+
+\section{Closed-form function of KL term}
+
+Here, we need to derive the closed-form function of KL term, $\text{KL}\left(q(\mathbf{Z}|\mathbf{X};\theta') \, || \, p(\mathbf{Z})\right)$. Suppose $Q \sim \mathcal{N}(\mu, \sigma^2)$ and the prior distribution $p(\mathbf{Z})$ is $\mathcal{N}(0, 1)$, the KL term can be expanded as:
+\begin{align}
+\text{KL}\left(q(\mathbf{Z}|\mathbf{X};\theta') \, || \, p(\mathbf{Z})\right) &= \int_z q(z|\mathbf{X};\theta') \ln \frac{q(z|\mathbf{X};\theta')}{p(z)} \\
+&= \int_{-\infty}^{\infty} \mathcal{N}(z; \mu, \sigma^2) \ln \frac{\mathcal{N}(z; \mu, \sigma^2)}{\mathcal{N}(z; 0, 1)} \, dz \\
+&= \mathbb{E}\left[\ln \frac{\mathcal{N}(\mathbf{Z}; \mu, \sigma^2)}{\mathcal{N}(\mathbf{Z}; 0, 1)} \right] \\
+&= \mathbb{E}\left[\ln \frac{\frac{1}{\sqrt{2 \pi \sigma^2}} \exp(\frac{-1}{2} \left(\frac{\mathbf{Z}-\mu}{\sigma}\right)^2)}{\frac{1}{\sqrt{2 \pi}} \exp \left(\frac{-1}{2} \mathbf{Z}^2\right)} \right] \\
+&= \mathbb{E}\left[\frac{1}{2} \ln \frac{1}{\sigma^2} - \frac{1}{2} \left(\frac{\mathbf{Z}-\mu}{\sigma}\right)^2 + \frac{1}{2} \mathbf{Z}^2 \right] \\
+&= \frac{1}{2} \mathbb{E}\left[\ln \frac{1}{\sigma^2} - \left(\frac{\mathbf{Z}-\mu}{\sigma}\right)^2 + \mathbf{Z}^2 \right] \\
+&= \frac{1}{2} \left( \ln \frac{1}{\sigma^2} - \frac{\mathbb{E}\left[(\mathbf{Z} - \mu)^2\right]}{\sigma^2} + \mathbb{E}\left[\mathbf{Z}^2 \right] \right).
+\end{align}
+
+Because $z \sim \mathcal{N}(\mu, \sigma^2)$, by definition, we have $\mathbb{E}\left[(\mathbf{Z} - \mu)^2\right] = \sigma^2$. Also, $\text{Var}\left[Q\right] = \sigma^2 = \mathbb{E}\left[\mathbf{Z}^2\right] - \left(\mathbb{E}\left[\mathbf{Z}\right]\right)^2$. Thus, we have $\mathbb{E}\left[\mathbf{Z}^2 \right] = \mu^2 + \sigma^2$. Finally, the closed-form function can be written as:
+\begin{align}
+&= \frac{1}{2} \left( \ln \frac{1}{\sigma^2} - \frac{\mathbb{E}\left[(\mathbf{Z} - \mu)^2\right]}{\sigma^2} + \mathbb{E}\left[\mathbf{Z}^2 \right] \right) \\
+&= \frac{1}{2} \left( -\ln \sigma^2 - 1 + \mu^2 + \sigma^2 \right).
+\end{align}
+
+\section{Gaussian Mixture Model as Prior}
+
+
+The Gaussian mixture model (GMM) combines multiple Gaussian distributions by calculating the weighted sum of each Gaussian distributions. Specifically, a GMM can be formally written as: 
+\begin{equation}
+p(\mathbf{Z}) = \sum_{k=1}^K \pi_k \mathcal{N}(\mathbf{Z}|\boldsymbol{\mu}_k, \boldsymbol{\Sigma}_k)
+\end{equation}
+where $\pi_k$ are mixture weights (with $\sum_{k=1}^K \pi_k = 1$), and $\boldsymbol{\mu}_k, \boldsymbol{\Sigma}_k$ are the mean and covariance of each component. Compared with standard normal distribution, GMM can capture multi-modal data distributions more effectively, increasing the VAE's representational capacity. However, the issue arises when calculating the closed-form function of the KL term. The KL term doesn't have closed-form solution when using GMM as prior distribution, due to the summation in logarithm. The lack of closed-form solution prevents us not able to efficiently optimize the encoder network through back-propagation. To deal with this, we can use Monte Carlo sampling to estimate the KL divergence. Specifically, we can evaluate KLD as follow:
+\begin{equation}
+\text{KL}\left(q(\mathbf{Z}|\mathbf{X};\theta') \, || \, p(\mathbf{Z})\right) \approx \frac{1}{N}\sum_{i=1}^{N} \ln \frac{q(z_i|\mathbf{X};\theta')}{p(z_i)}, 
+\end{equation}
+where $z_i$ samples from $q(\mathbf{Z}|\mathbf{X};\theta')$, $N$ is the number of samples and $p(\mathbf{Z})$ is the prior GMM distribution.
+
+
+
+\end{document}
