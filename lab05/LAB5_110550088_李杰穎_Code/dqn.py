@@ -33,7 +33,7 @@ class DQN(nn.Module):
         - Feel free to change the architecture (e.g. number of hidden layers and the width of each hidden layer) as you like
         - Feel free to add any member variables/functions whenever needed
     """
-    def __init__(self, num_actions):
+    def __init__(self, input_dim, num_actions, conv=False, hidden_dim=64):
         super(DQN, self).__init__()
         # An example: 
         #self.network = nn.Sequential(
@@ -44,7 +44,27 @@ class DQN(nn.Module):
         #    nn.Linear(64, num_actions)
         #)       
         ########## YOUR CODE HERE (5~10 lines) ##########
-
+        if conv:
+            self.network = nn.Sequential(
+                nn.Conv2d(4, 32, kernel_size=8, stride=4),
+                nn.ReLU(),
+                nn.Conv2d(32, 64, kernel_size=4, stride=2),
+                nn.ReLU(),
+                nn.Conv2d(64, 64, kernel_size=3, stride=1),
+                nn.ReLU(),
+                nn.Flatten(),
+                nn.Linear(64 * 7 * 7, 512),
+                nn.ReLU(),
+                nn.Linear(512, num_actions)
+            )
+        else:
+            self.network = nn.Sequential(
+                nn.Linear(input_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, num_actions)
+            )
         
         ########## END OF YOUR CODE ##########
 
@@ -91,17 +111,41 @@ class PrioritizedReplayBuffer:
 
     def add(self, transition, error):
         ########## YOUR CODE HERE (for Task 3) ########## 
-                    
+        p = abs(error) + 1e-5
+        if len(self.buffer) < self.capacity:
+            self.buffer.append(transition)
+            self.priorities[self.pos] = p
+        else:
+            # pop the oldest transition
+            self.buffer[self.pos] = transition
+            self.priorities[self.pos] = p
+        self.pos = (self.pos + 1) % self.capacity
         ########## END OF YOUR CODE (for Task 3) ########## 
         return 
     def sample(self, batch_size):
-        ########## YOUR CODE HERE (for Task 3) ########## 
-                    
+        ########## YOUR CODE HERE (for Task 3) ##########
+        # Sample a batch of transitions from the replay buffer
+        if len(self.buffer) == 0:
+            return None, None, None, None, None
+        if len(self.buffer) < batch_size:
+            batch_size = len(self.buffer)
+        # Calculate the sampling probabilities
+        scaled_priorities = self.priorities[:len(self.buffer)] ** self.alpha
+        sampling_probabilities = scaled_priorities / np.sum(scaled_priorities)
+        is_weight = (len(self.buffer) * sampling_probabilities) ** (-self.beta)
+        # Sample indices based on the sampling probabilities
+        indices = np.random.choice(len(self.buffer), batch_size, p=is_weight)
+        # Sample transitions based on the sampled indices
+        batch = [self.buffer[i] for i in indices]
+        states, actions, rewards, next_states, dones = zip(*batch)
         ########## END OF YOUR CODE (for Task 3) ########## 
-        return
+        return states, actions, rewards, next_states, dones, indices 
     def update_priorities(self, indices, errors):
         ########## YOUR CODE HERE (for Task 3) ########## 
-                    
+        # Update the priorities of the sampled transitions
+        for idx, error in zip(indices, errors):
+            p = abs(error) + 1e-5
+            self.priorities[idx] = p
         ########## END OF YOUR CODE (for Task 3) ########## 
         return
         
@@ -110,16 +154,18 @@ class DQNAgent:
     def __init__(self, env_name="CartPole-v1", args=None):
         self.env = gym.make(env_name, render_mode="rgb_array")
         self.test_env = gym.make(env_name, render_mode="rgb_array")
+        self.input_dim = self.env.observation_space.shape[0]
         self.num_actions = self.env.action_space.n
         self.preprocessor = AtariPreprocessor()
+        self.memory = PrioritizedReplayBuffer(capacity=args.memory_size)
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print("Using device:", self.device)
 
 
-        self.q_net = DQN(self.num_actions).to(self.device)
+        self.q_net = DQN(self.input_dim, self.num_actions, conv=(env_name == "ALE/Pong-v5")).to(self.device)
         self.q_net.apply(init_weights)
-        self.target_net = DQN(self.num_actions).to(self.device)
+        self.target_net = DQN(self.input_dim, self.num_actions).to(self.device)
         self.target_net.load_state_dict(self.q_net.state_dict())
         self.optimizer = optim.Adam(self.q_net.parameters(), lr=args.lr)
 
@@ -162,7 +208,8 @@ class DQNAgent:
                 done = terminated or truncated
                 
                 next_state = self.preprocessor.step(next_obs)
-                self.memory.append((state, action, reward, next_state, done))
+                initial_error = 1.0  # High priority for new experiences
+                self.memory.add((state, action, reward, next_state, done), initial_error)
 
                 for _ in range(self.train_per_step):
                     self.train()
@@ -182,8 +229,11 @@ class DQNAgent:
                         "Epsilon": self.epsilon
                     })
                     ########## YOUR CODE HERE  ##########
-                    # Add additional wandb logs for debugging if needed 
-                    
+                    # Add additional wandb logs for debugging if needed
+                    wandb.log({
+                        "Memory Size": len(self.memory.buffer),
+                        "Beta": self.memory.beta,
+                    })                    
                     ########## END OF YOUR CODE ##########   
             print(f"[Eval] Ep: {ep} Total Reward: {total_reward} SC: {self.env_count} UC: {self.train_count} Eps: {self.epsilon:.4f}")
             wandb.log({
@@ -191,11 +241,14 @@ class DQNAgent:
                 "Total Reward": total_reward,
                 "Env Step Count": self.env_count,
                 "Update Count": self.train_count,
-                "Epsilon": self.epsilon
+                "Epsilon": self.epsilon,
             })
             ########## YOUR CODE HERE  ##########
             # Add additional wandb logs for debugging if needed 
-            
+            wandb.log({
+                "Episode Length": step_count,
+                "Average Reward": total_reward / max(1, step_count)
+            })
             ########## END OF YOUR CODE ##########  
             if ep % 100 == 0:
                 model_path = os.path.join(self.save_dir, f"model_ep{ep}.pt")
@@ -236,7 +289,7 @@ class DQNAgent:
 
     def train(self):
 
-        if len(self.memory) < self.replay_start_size:
+        if len(self.memory.buffer) < self.replay_start_size:
             return 
         
         # Decay function for epsilin-greedy exploration
@@ -246,37 +299,50 @@ class DQNAgent:
        
         ########## YOUR CODE HERE (<5 lines) ##########
         # Sample a mini-batch of (s,a,r,s',done) from the replay buffer
-
-      
-            
+        states, actions, rewards, next_states, dones, indices = self.memory.sample(self.batch_size)
+        if states is None:
+            return
         ########## END OF YOUR CODE ##########
 
         # Convert the states, actions, rewards, next_states, and dones into torch tensors
         # NOTE: Enable this part after you finish the mini-batch sampling
-        #states = torch.from_numpy(np.array(states).astype(np.float32)).to(self.device)
-        #next_states = torch.from_numpy(np.array(next_states).astype(np.float32)).to(self.device)
-        #actions = torch.tensor(actions, dtype=torch.int64).to(self.device)
-        #rewards = torch.tensor(rewards, dtype=torch.float32).to(self.device)
-        #dones = torch.tensor(dones, dtype=torch.float32).to(self.device)
-        #q_values = self.q_net(states).gather(1, actions.unsqueeze(1)).squeeze(1)
+        states = torch.from_numpy(np.array(states).astype(np.float32)).to(self.device)
+        next_states = torch.from_numpy(np.array(next_states).astype(np.float32)).to(self.device)
+        actions = torch.tensor(actions, dtype=torch.int64).to(self.device)
+        rewards = torch.tensor(rewards, dtype=torch.float32).to(self.device)
+        dones = torch.tensor(dones, dtype=torch.float32).to(self.device)
+        q_values = self.q_net(states).gather(1, actions.unsqueeze(1)).squeeze(1)
         
         ########## YOUR CODE HERE (~10 lines) ##########
         # Implement the loss function of DQN and the gradient updates 
-      
-        
-      
+        # Compute the Q-values for the current states
+        q_values = self.q_net(states).gather(1, actions.unsqueeze(1)).squeeze(1)
+        # Compute the Q-values for the next states using the target network
+        next_q_values = self.target_net(next_states).max(1)[0]
+        # Compute the target Q-values
+        target_q_values = rewards + (1 - dones) * self.gamma * next_q_values
+        # Compute the loss
+        loss = nn.MSELoss()(q_values, target_q_values.detach())
+        # Perform the optimization step
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        # Update the priorities of the sampled transitions
+        errors = (q_values - target_q_values.detach()).abs().cpu().numpy()
+        self.memory.update_priorities(indices, errors)
         ########## END OF YOUR CODE ##########  
 
         if self.train_count % self.target_update_frequency == 0:
             self.target_net.load_state_dict(self.q_net.state_dict())
 
         # NOTE: Enable this part if "loss" is defined
-        #if self.train_count % 1000 == 0:
-        #    print(f"[Train #{self.train_count}] Loss: {loss.item():.4f} Q mean: {q_values.mean().item():.3f} std: {q_values.std().item():.3f}")
+        if self.train_count % 1000 == 0:
+           print(f"[Train #{self.train_count}] Loss: {loss.item():.4f} Q mean: {q_values.mean().item():.3f} std: {q_values.std().item():.3f}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--env-name", type=str, default="CartPole-v1", choices=["CartPole-v1", "ALE/Pong-v5"])   
     parser.add_argument("--save-dir", type=str, default="./results")
     parser.add_argument("--wandb-run-name", type=str, default="cartpole-run")
     parser.add_argument("--batch-size", type=int, default=32)
@@ -293,5 +359,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     wandb.init(project="DLP-Lab5-DQN-CartPole", name=args.wandb_run_name, save_code=True)
-    agent = DQNAgent(args=args)
+    agent = DQNAgent(env_name=args.env_name, args=args)
     agent.run()
