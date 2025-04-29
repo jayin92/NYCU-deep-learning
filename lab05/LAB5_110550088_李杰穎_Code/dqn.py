@@ -1,8 +1,3 @@
-# Spring 2025, 535507 Deep Learning
-# Lab5: Value-based RL
-# Contributors: Wei Hung and Alison Wen
-# Instructor: Ping-Chun Hsieh
-
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -28,49 +23,104 @@ def init_weights(m):
 
 class DQN(nn.Module):
     """
-        Design the architecture of your deep Q network
-        - Input size is the same as the state dimension; the output size is the same as the number of actions
-        - Feel free to change the architecture (e.g. number of hidden layers and the width of each hidden layer) as you like
-        - Feel free to add any member variables/functions whenever needed
+    DQN with optional dueling architecture
     """
-    def __init__(self, input_dim, num_actions, conv=False, hidden_dim=64):
+    def __init__(self, input_dim, num_actions, conv=False, hidden_dim=64, dueling=False):
         super(DQN, self).__init__()
-        # An example: 
-        #self.network = nn.Sequential(
-        #    nn.Linear(input_dim, 64),
-        #    nn.ReLU(),
-        #    nn.Linear(64, 64),
-        #    nn.ReLU(),
-        #    nn.Linear(64, num_actions)
-        #)       
-        ########## YOUR CODE HERE (5~10 lines) ##########
+        self.conv = conv
+        self.dueling = dueling
+        self.num_actions = num_actions
+        
         if conv:
-            self.network = nn.Sequential(
-                nn.Conv2d(4, 32, kernel_size=8, stride=4),
+            # Feature extraction layers for convolutional input
+            self.features = nn.Sequential(
+                nn.Conv2d(input_dim, 16, kernel_size=8, stride=4),  # (N, 32, 20, 20)
                 nn.ReLU(),
-                nn.Conv2d(32, 64, kernel_size=4, stride=2),
+                nn.Conv2d(16, 32, kernel_size=4, stride=2),  # (N, 64, 9, 9)
                 nn.ReLU(),
-                nn.Conv2d(64, 64, kernel_size=3, stride=1),
+                nn.Conv2d(32, 32, kernel_size=3, stride=1),  # (N, 64, 7, 7)
                 nn.ReLU(),
-                nn.Flatten(),
-                nn.Linear(64 * 7 * 7, 512),
-                nn.ReLU(),
-                nn.Linear(512, num_actions)
+                nn.Flatten()  # (N, 64 * 7 * 7 = 3136)
             )
+            
+            feature_output_dim = 32 * 7 * 7
+            
+            if dueling:
+                # Separate value and advantage streams for dueling architecture
+                self.value_stream = nn.Sequential(
+                    nn.Linear(feature_output_dim, 256),
+                    nn.ReLU(),
+                    nn.Linear(256, 1)
+                )
+                
+                self.advantage_stream = nn.Sequential(
+                    nn.Linear(feature_output_dim, 256),
+                    nn.ReLU(),
+                    nn.Linear(256, num_actions)
+                )
+            else:
+                # Standard DQN output
+                self.fc = nn.Sequential(
+                    nn.Linear(feature_output_dim, 512),
+                    nn.ReLU(),
+                    nn.Linear(512, num_actions)
+                )
         else:
-            self.network = nn.Sequential(
+            # Feature extraction for non-convolutional input
+            self.features = nn.Sequential(
                 nn.Linear(input_dim, hidden_dim),
                 nn.ReLU(),
                 nn.Linear(hidden_dim, hidden_dim),
-                nn.ReLU(),
-                nn.Linear(hidden_dim, num_actions)
+                nn.ReLU()
             )
-        
-        ########## END OF YOUR CODE ##########
+            
+            if dueling:
+                # Separate value and advantage streams for dueling architecture
+                self.value_stream = nn.Sequential(
+                    nn.Linear(hidden_dim, 1)
+                )
+                
+                self.advantage_stream = nn.Sequential(
+                    nn.Linear(hidden_dim, num_actions)
+                )
+            else:
+                # Standard DQN output
+                self.fc = nn.Sequential(
+                    nn.Linear(hidden_dim, num_actions)
+                )
 
     def forward(self, x):
-        return self.network(x)
+        if self.conv:
+            x = x / 255.0
+            
+        features = self.features(x)
+        
+        if self.dueling:
+            values = self.value_stream(features)
+            advantages = self.advantage_stream(features)
+            
+            # Combine value and advantage streams using the dueling formula
+            # Q(s,a) = V(s) + (A(s,a) - mean(A(s,:)))
+            return values + (advantages - advantages.mean(dim=1, keepdim=True))
+        else:
+            return self.fc(features)
 
+
+class SimplePreprocessor:
+    """
+        Preprocessing the state input of DQN for CartPole
+    """
+    def __init__(self):
+        pass
+
+    def preprocess(self, obs):
+        return obs
+
+    def reset(self, obs):
+        return self.preprocess(obs)
+
+    def step(self, obs):
+        return self.preprocess(obs)
 
 class AtariPreprocessor:
     """
@@ -81,9 +131,26 @@ class AtariPreprocessor:
         self.frames = deque(maxlen=frame_stack)
 
     def preprocess(self, obs):
+        # Convert to grayscale
         gray = cv2.cvtColor(obs, cv2.COLOR_RGB2GRAY)
+        
+        # Crop irrelevant parts
+        gray = gray[34:194, :]
+        
+        # Resize to 84x84
         resized = cv2.resize(gray, (84, 84), interpolation=cv2.INTER_AREA)
-        return resized
+        _, thresholded = cv2.threshold(resized, 127, 255, cv2.THRESH_BINARY)
+        
+        # # Normalize pixel values to 0-1 range
+        # normalized = resized / 255.0
+        
+        # # Enhance contrast
+        # normalized = np.clip((normalized - 0.2) * 1.5, 0, 1)
+        
+        # # Convert back to uint8 (0-255 range)
+        # enhanced = (normalized * 255).astype(np.uint8)
+        
+        return thresholded
 
     def reset(self, obs):
         frame = self.preprocess(obs)
@@ -95,57 +162,118 @@ class AtariPreprocessor:
         self.frames.append(frame)
         return np.stack(self.frames, axis=0)
 
+class UniformReplayBuffer:
+    def __init__(self, capacity, alpha=0.6, beta=0.4):
+        self.capacity = capacity
+        self.beta = beta
+        self.buffer = []
+        self.pos = 0
+
+    def add(self, transition, error):        
+        # Add transition to buffer
+        if len(self.buffer) < self.capacity:
+            self.buffer.append(transition)
+        else:
+            self.buffer[self.pos] = transition
+        
+        self.pos = (self.pos + 1) % self.capacity
+        
+    def sample(self, batch_size):
+        # If buffer is empty or not enough samples, return None
+        if len(self.buffer) == 0:
+            return None, None, None, None, None, None
+        if len(self.buffer) < batch_size:
+            batch_size = len(self.buffer)
+    
+        indices = np.random.choice(len(self.buffer), batch_size)
+        
+        # Calculate importance sampling weights
+        weights = np.ones((batch_size,), dtype=np.float32)
+        
+        # Get the sampled transitions
+        batch = [self.buffer[i] for i in indices]
+        states, actions, rewards, next_states, dones = zip(*batch)
+        
+        return states, actions, rewards, next_states, dones, indices, weights
+    
+    def __len__(self):
+        return len(self.buffer)
+
+    def update_priorities(self, indices, errors):
+        return
 
 class PrioritizedReplayBuffer:
     """
         Prioritizing the samples in the replay memory by the Bellman error
         See the paper (Schaul et al., 2016) at https://arxiv.org/abs/1511.05952
     """ 
-    def __init__(self, capacity, alpha=0.6, beta=0.4):
+    def __init__(self, capacity, alpha=0.5, beta=0.4):
         self.capacity = capacity
         self.alpha = alpha
         self.beta = beta
+        self.beta_increment = (1.0 - beta) / 200000  # Increment beta gradually
         self.buffer = []
         self.priorities = np.zeros((capacity,), dtype=np.float32)
+        self.max_priority = 1.0
         self.pos = 0
 
-    def add(self, transition, error):
-        ########## YOUR CODE HERE (for Task 3) ########## 
-        p = abs(error) + 1e-5
+    def add(self, transition, error=None):
+        # Calculate priority based on TD error
+        if error is None:
+            priority = self.max_priority
+        else:
+            priority = (abs(error) + 1e-5) ** self.alpha
+        
+        # Add transition to buffer
         if len(self.buffer) < self.capacity:
             self.buffer.append(transition)
-            self.priorities[self.pos] = p
         else:
-            # pop the oldest transition
             self.buffer[self.pos] = transition
-            self.priorities[self.pos] = p
+        
+        # Update priority
+        self.priorities[self.pos] = priority
         self.pos = (self.pos + 1) % self.capacity
-        ########## END OF YOUR CODE (for Task 3) ########## 
-        return 
+        
     def sample(self, batch_size):
-        ########## YOUR CODE HERE (for Task 3) ##########
-        # Sample a batch of transitions from the replay buffer
+        # If buffer is empty or not enough samples, return None
         if len(self.buffer) == 0:
-            return None, None, None, None, None
+            return None, None, None, None, None, None
         if len(self.buffer) < batch_size:
             batch_size = len(self.buffer)
-        # Calculate the sampling probabilities
-        scaled_priorities = self.priorities[:len(self.buffer)] ** self.alpha
-        sampling_probabilities = scaled_priorities / np.sum(scaled_priorities)
-        is_weight = (len(self.buffer) * sampling_probabilities) ** (-self.beta)
-        # Sample indices based on the sampling probabilities
-        indices = np.random.choice(len(self.buffer), batch_size, p=is_weight)
-        # Sample transitions based on the sampled indices
+        
+        # Calculate sampling probabilities
+        priorities = self.priorities[:len(self.buffer)]
+        probabilities = priorities / np.sum(priorities)
+        
+        # Sample indices based on the probabilities
+        indices = np.random.choice(len(self.buffer), batch_size, p=probabilities, replace=False)
+        
+        # Calculate importance sampling weights
+        weights = (len(self.buffer) * probabilities[indices]) ** (-self.beta)
+        weights /= weights.max()  # Normalize weights
+        
+        # Gradually increase beta to 1
+        self.beta = min(1.0, self.beta + self.beta_increment)
+        
+        # Get the sampled transitions
         batch = [self.buffer[i] for i in indices]
         states, actions, rewards, next_states, dones = zip(*batch)
-        ########## END OF YOUR CODE (for Task 3) ########## 
-        return states, actions, rewards, next_states, dones, indices 
+        
+        return states, actions, rewards, next_states, dones, indices, weights
+    
+    def __len__(self):
+        return len(self.buffer)
+
     def update_priorities(self, indices, errors):
         ########## YOUR CODE HERE (for Task 3) ########## 
         # Update the priorities of the sampled transitions
         for idx, error in zip(indices, errors):
-            p = abs(error) + 1e-5
-            self.priorities[idx] = p
+            # Ensure idx is within valid range
+            if idx < len(self.buffer):
+                # Calculate new priority and update
+                self.priorities[idx] = (abs(error) + 1e-5) ** self.alpha
+                self.max_priority = max(self.max_priority, self.priorities[idx])
+
         ########## END OF YOUR CODE (for Task 3) ########## 
         return
         
@@ -154,36 +282,63 @@ class DQNAgent:
     def __init__(self, env_name="CartPole-v1", args=None):
         self.env = gym.make(env_name, render_mode="rgb_array")
         self.test_env = gym.make(env_name, render_mode="rgb_array")
-        self.input_dim = self.env.observation_space.shape[0]
         self.num_actions = self.env.action_space.n
-        self.preprocessor = AtariPreprocessor()
-        self.memory = PrioritizedReplayBuffer(capacity=args.memory_size)
+        if args.replay_buffer_type == "uniform":
+            self.memory = UniformReplayBuffer(capacity=args.memory_size)
+        elif args.replay_buffer_type == "prioritized":
+            self.memory = PrioritizedReplayBuffer(capacity=args.memory_size)
+        else:
+            raise ValueError("Invalid replay buffer type. Choose 'uniform' or 'prioritized'.")
+
+        if env_name == "ALE/Pong-v5":
+            self.preprocessor = AtariPreprocessor()
+            self.input_dim = 4  # For convolutional input (4 stacked frames)
+        elif env_name == "CartPole-v1":
+            self.preprocessor = SimplePreprocessor()
+            self.input_dim = self.env.observation_space.shape[0]
+        else:
+            raise ValueError(f"Unsupported environment: {env_name}")
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print("Using device:", self.device)
 
+        self.dueling = args.dueling_dqn
 
-        self.q_net = DQN(self.input_dim, self.num_actions, conv=(env_name == "ALE/Pong-v5")).to(self.device)
+        self.q_net = DQN(self.input_dim, self.num_actions, conv=(env_name == "ALE/Pong-v5"), dueling=self.dueling).to(self.device)
         self.q_net.apply(init_weights)
-        self.target_net = DQN(self.input_dim, self.num_actions).to(self.device)
+        self.target_net = DQN(self.input_dim, self.num_actions, conv=(env_name == "ALE/Pong-v5"), dueling=self.dueling).to(self.device)
         self.target_net.load_state_dict(self.q_net.state_dict())
         self.optimizer = optim.Adam(self.q_net.parameters(), lr=args.lr)
 
         self.batch_size = args.batch_size
         self.gamma = args.discount_factor
         self.epsilon = args.epsilon_start
-        self.epsilon_decay = args.epsilon_decay
+        self.epsilon_start = args.epsilon_start
+        # self.epsilon_decay = args.epsilon_decay
+        self.epsilon_decay_steps = args.epsilon_decay_steps
         self.epsilon_min = args.epsilon_min
 
         self.env_count = 0
         self.train_count = 0
-        self.best_reward = 0  # Initialize to 0 for CartPole and to -21 for Pong
+        self.best_reward = -21 if env_name == "ALE/Pong-v5" else 0
         self.max_episode_steps = args.max_episode_steps
         self.replay_start_size = args.replay_start_size
         self.target_update_frequency = args.target_update_frequency
         self.train_per_step = args.train_per_step
+        self.train_frequency = args.train_frequency
         self.save_dir = args.save_dir
         os.makedirs(self.save_dir, exist_ok=True)
+
+        # Double DQN
+        self.double_dqn = args.double_dqn
+
+        # Multi-step Q-learning
+        self.n_step = args.n_step
+        self.n_step_buffer = deque(maxlen=self.n_step)
+
+        # Milestone
+        self.milestone_steps = [200_000, 400_000, 600_000, 800_000, 1_000_000, 1_200_000, 2_000_000]
+        self.saved_milestones = set()  # Keep track of which milestones we've saved
 
     def select_action(self, state):
         if random.random() < self.epsilon:
@@ -196,7 +351,7 @@ class DQNAgent:
     def run(self, episodes=1000):
         for ep in range(episodes):
             obs, _ = self.env.reset()
-
+            
             state = self.preprocessor.reset(obs)
             done = False
             total_reward = 0
@@ -208,16 +363,58 @@ class DQNAgent:
                 done = terminated or truncated
                 
                 next_state = self.preprocessor.step(next_obs)
-                initial_error = 1.0  # High priority for new experiences
-                self.memory.add((state, action, reward, next_state, done), initial_error)
+                
+                self.n_step_buffer.append((state, action, reward, next_state, done))
+                if len(self.n_step_buffer) == self.n_step:
+                    # Calculate n-step return
+                    init_state, init_action, _, _, _ = self.n_step_buffer[0]
+                    n_step_return = sum([r * (self.gamma ** i) for i, (_, _, r, _, _) in enumerate(self.n_step_buffer)])
 
-                for _ in range(self.train_per_step):
-                    self.train()
+                    final_next_state = self.n_step_buffer[-1][3]
+                    final_done = self.n_step_buffer[-1][4]
+
+                    self.memory.add((init_state, init_action, n_step_return, final_next_state, final_done), error=None)
+
+                elif self.n_step == 1:
+                    self.memory.add((state, action, reward, next_state, done), error=None)
+    
+
+                # Use initial priority of 1.0 (high priority) for new experiences
+                if self.env_count % self.train_frequency == 0:
+                    for _ in range(self.train_per_step):
+                        self.train()
 
                 state = next_state
                 total_reward += reward
                 self.env_count += 1
                 step_count += 1
+
+                # if self.env_count % 1000 == 0:
+                #     if self.epsilon > self.epsilon_min:
+                #         self.epsilon *= self.epsilon_decay
+                #         self.epsilon = max(self.epsilon, self.epsilon_min)
+
+                for milestone in self.milestone_steps:
+                    if self.env_count >= milestone and milestone not in self.saved_milestones:
+                        model_path = os.path.join(self.save_dir, f"model_step{milestone}.pt")
+                        torch.save(self.q_net.state_dict(), model_path)
+                        print(f"[Milestone] Saved checkpoint at {milestone} environment steps to {model_path}")
+                        wandb.log({
+                            "Milestone": milestone,
+                            "Checkpoint Saved": True
+                        })
+                        self.saved_milestones.add(milestone)
+                        # Evaluate at milestone
+                        eval_rewards = []
+                        for _ in range(10):
+                            eval_reward = self.evaluate()
+                            eval_rewards.append(eval_reward)
+                        avg_eval_reward = sum(eval_rewards) / len(eval_rewards)
+                        print(f"[Milestone Eval] Step: {milestone} Avg Eval Reward: {avg_eval_reward:.2f}")
+                        wandb.log({
+                            "Milestone": milestone,
+                            "Milestone Eval Reward": avg_eval_reward
+                        })
 
                 if self.env_count % 1000 == 0:                 
                     print(f"[Collect] Ep: {ep} Step: {step_count} SC: {self.env_count} UC: {self.train_count} Eps: {self.epsilon:.4f}")
@@ -228,13 +425,12 @@ class DQNAgent:
                         "Update Count": self.train_count,
                         "Epsilon": self.epsilon
                     })
-                    ########## YOUR CODE HERE  ##########
-                    # Add additional wandb logs for debugging if needed
+                    # Additional wandb logs for debugging
                     wandb.log({
-                        "Memory Size": len(self.memory.buffer),
-                        "Beta": self.memory.beta,
-                    })                    
-                    ########## END OF YOUR CODE ##########   
+                        "Memory Size": len(self.memory),
+                        "Beta": self.memory.beta
+                    })
+                      
             print(f"[Eval] Ep: {ep} Total Reward: {total_reward} SC: {self.env_count} UC: {self.train_count} Eps: {self.epsilon:.4f}")
             wandb.log({
                 "Episode": ep,
@@ -243,32 +439,54 @@ class DQNAgent:
                 "Update Count": self.train_count,
                 "Epsilon": self.epsilon,
             })
-            ########## YOUR CODE HERE  ##########
-            # Add additional wandb logs for debugging if needed 
+            # Additional end-of-episode logging
             wandb.log({
                 "Episode Length": step_count,
                 "Average Reward": total_reward / max(1, step_count)
             })
-            ########## END OF YOUR CODE ##########  
+              
             if ep % 100 == 0:
                 model_path = os.path.join(self.save_dir, f"model_ep{ep}.pt")
                 torch.save(self.q_net.state_dict(), model_path)
                 print(f"Saved model checkpoint to {model_path}")
 
             if ep % 20 == 0:
-                eval_reward = self.evaluate()
-                if eval_reward > self.best_reward:
-                    self.best_reward = eval_reward
+                eval_rewards = []
+                for _ in range(10):
+                    eval_reward = self.evaluate()
+                    eval_rewards.append(eval_reward)
+                avg_eval_reward = sum(eval_rewards) / len(eval_rewards)
+                if avg_eval_reward > self.best_reward:
+                    self.best_reward = avg_eval_reward
                     model_path = os.path.join(self.save_dir, "best_model.pt")
                     torch.save(self.q_net.state_dict(), model_path)
-                    print(f"Saved new best model to {model_path} with reward {eval_reward}")
-                print(f"[TrueEval] Ep: {ep} Eval Reward: {eval_reward:.2f} SC: {self.env_count} UC: {self.train_count}")
+                    print(f"Saved new best model to {model_path} with reward {avg_eval_reward}")
+                print(f"[TrueEval] Ep: {ep} Avg Eval Reward: {avg_eval_reward:.2f} SC: {self.env_count} UC: {self.train_count}")
                 wandb.log({
                     "Env Step Count": self.env_count,
                     "Update Count": self.train_count,
-                    "Eval Reward": eval_reward
+                    "Eval Reward": avg_eval_reward
                 })
 
+            # Process transitions still in the buffer (less than n)
+            while len(self.n_step_buffer) > 0:
+                initial_state = self.n_step_buffer[0][0]
+                initial_action = self.n_step_buffer[0][1]
+                
+                # Calculate return for remaining steps
+                n_step_return = 0
+                for i in range(len(self.n_step_buffer)):
+                    n_step_return += (self.gamma**i) * self.n_step_buffer[i][2]
+                
+                final_next_state = self.n_step_buffer[-1][3]
+                final_done = self.n_step_buffer[-1][4]
+                
+                # Add to buffer
+                self.memory.add((initial_state, initial_action, n_step_return, final_next_state, final_done), error=None)
+                
+                # Remove the first item and continue
+                self.n_step_buffer.popleft()
+        
     def evaluate(self):
         obs, _ = self.test_env.reset()
         state = self.preprocessor.reset(obs)
@@ -286,58 +504,62 @@ class DQNAgent:
 
         return total_reward
 
-
     def train(self):
-
-        if len(self.memory.buffer) < self.replay_start_size:
+        if len(self.memory) < self.replay_start_size:
             return 
-        
-        # Decay function for epsilin-greedy exploration
-        if self.epsilon > self.epsilon_min:
-            self.epsilon *= self.epsilon_decay
+
+        fraction = min(1.0, self.env_count / self.epsilon_decay_steps)
+        self.epsilon = self.epsilon_start + fraction * (self.epsilon_min - self.epsilon_start)
         self.train_count += 1
-       
-        ########## YOUR CODE HERE (<5 lines) ##########
-        # Sample a mini-batch of (s,a,r,s',done) from the replay buffer
-        states, actions, rewards, next_states, dones, indices = self.memory.sample(self.batch_size)
+
+        states, actions, rewards, next_states, dones, indices, weights = self.memory.sample(self.batch_size)
         if states is None:
             return
-        ########## END OF YOUR CODE ##########
 
-        # Convert the states, actions, rewards, next_states, and dones into torch tensors
-        # NOTE: Enable this part after you finish the mini-batch sampling
         states = torch.from_numpy(np.array(states).astype(np.float32)).to(self.device)
         next_states = torch.from_numpy(np.array(next_states).astype(np.float32)).to(self.device)
         actions = torch.tensor(actions, dtype=torch.int64).to(self.device)
         rewards = torch.tensor(rewards, dtype=torch.float32).to(self.device)
         dones = torch.tensor(dones, dtype=torch.float32).to(self.device)
+        weights = torch.tensor(weights, dtype=torch.float32).to(self.device)
+
         q_values = self.q_net(states).gather(1, actions.unsqueeze(1)).squeeze(1)
-        
-        ########## YOUR CODE HERE (~10 lines) ##########
-        # Implement the loss function of DQN and the gradient updates 
-        # Compute the Q-values for the current states
-        q_values = self.q_net(states).gather(1, actions.unsqueeze(1)).squeeze(1)
-        # Compute the Q-values for the next states using the target network
-        next_q_values = self.target_net(next_states).max(1)[0]
-        # Compute the target Q-values
-        target_q_values = rewards + (1 - dones) * self.gamma * next_q_values
-        # Compute the loss
-        loss = nn.MSELoss()(q_values, target_q_values.detach())
-        # Perform the optimization step
+
+        with torch.no_grad():
+            if self.double_dqn:
+                next_actions = self.q_net(next_states).argmax(1, keepdim=True)
+                next_q_values = self.target_net(next_states).gather(1, next_actions).squeeze(1)
+            else:
+                next_q_values = self.target_net(next_states).max(1)[0]
+
+            target_q_values = rewards + (1 - dones) * (self.gamma ** self.n_step) * next_q_values
+
+        td_errors = q_values - target_q_values.detach()
+        # use Huber loss
+        loss = (weights * torch.nn.functional.smooth_l1_loss(q_values, target_q_values.detach(), reduction='none')).mean()
+    
+        # loss = (weights * td_errors.pow(2)).mean()
+
         self.optimizer.zero_grad()
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.q_net.parameters(), 10)
         self.optimizer.step()
-        # Update the priorities of the sampled transitions
-        errors = (q_values - target_q_values.detach()).abs().cpu().numpy()
-        self.memory.update_priorities(indices, errors)
-        ########## END OF YOUR CODE ##########  
+
+        with torch.no_grad():
+            td_errors_np = td_errors.abs().cpu().numpy()
+        self.memory.update_priorities(indices, td_errors_np)
 
         if self.train_count % self.target_update_frequency == 0:
             self.target_net.load_state_dict(self.q_net.state_dict())
 
-        # NOTE: Enable this part if "loss" is defined
         if self.train_count % 1000 == 0:
-           print(f"[Train #{self.train_count}] Loss: {loss.item():.4f} Q mean: {q_values.mean().item():.3f} std: {q_values.std().item():.3f}")
+            print(f"[Train #{self.train_count}] Loss: {loss.item():.4f} Q mean: {q_values.mean().item():.3f} std: {q_values.std().item():.3f}")
+            wandb.log({
+                "Training Loss": loss.item(),
+                "Q Values Mean": q_values.mean().item(),
+                "Q Values Std": q_values.std().item(),
+                "Target Q Values Mean": target_q_values.mean().item()
+            })
 
 
 if __name__ == "__main__":
@@ -345,19 +567,31 @@ if __name__ == "__main__":
     parser.add_argument("--env-name", type=str, default="CartPole-v1", choices=["CartPole-v1", "ALE/Pong-v5"])   
     parser.add_argument("--save-dir", type=str, default="./results")
     parser.add_argument("--wandb-run-name", type=str, default="cartpole-run")
-    parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--memory-size", type=int, default=100000)
-    parser.add_argument("--lr", type=float, default=0.0001)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--num-episodes", type=int, default=1000)
+    parser.add_argument("--replay-buffer-type", type=str, default="uniform", choices=["uniform", "prioritized"])
+    parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--memory-size", type=int, default=10000)
+    parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--discount-factor", type=float, default=0.99)
     parser.add_argument("--epsilon-start", type=float, default=1.0)
-    parser.add_argument("--epsilon-decay", type=float, default=0.999999)
-    parser.add_argument("--epsilon-min", type=float, default=0.05)
-    parser.add_argument("--target-update-frequency", type=int, default=1000)
-    parser.add_argument("--replay-start-size", type=int, default=50000)
-    parser.add_argument("--max-episode-steps", type=int, default=10000)
+    parser.add_argument("--epsilon-decay", type=float, default=0.995)
+    parser.add_argument("--epsilon-decay-steps", type=int, default=1000000)
+    parser.add_argument("--epsilon-min", type=float, default=0.01)
+    parser.add_argument("--target-update-frequency", type=int, default=200)
+    parser.add_argument("--replay-start-size", type=int, default=1000)
+    parser.add_argument("--max-episode-steps", type=int, default=1000)
     parser.add_argument("--train-per-step", type=int, default=1)
+    parser.add_argument("--train-frequency", type=int, default=4)
+    # Double-DQN
+    parser.add_argument("--double-dqn", action="store_true", default=False)
+    # Multi-step Q-learning
+    parser.add_argument("--n-step", type=int, default=1)
+    # Dueling DQN
+    parser.add_argument("--dueling-dqn", action="store_true", default=False, help="Use dueling network architecture")
     args = parser.parse_args()
 
     wandb.init(project="DLP-Lab5-DQN-CartPole", name=args.wandb_run_name, save_code=True)
     agent = DQNAgent(env_name=args.env_name, args=args)
-    agent.run()
+    agent.run(episodes=args.num_episodes)
+    wandb.finish()
