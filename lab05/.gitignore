@@ -1,3 +1,5 @@
 grid_search_results
 results*
 eval_videos*
+*.pt
+*.mp4
