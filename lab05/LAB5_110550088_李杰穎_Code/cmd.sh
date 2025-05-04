@@ -229,3 +229,14 @@ python dqn.py --env-name ALE/Pong-v5 --save-dir results_pong_wo_huber/ --wandb-r
 
 python dqn.py --env-name ALE/Pong-v5 --save-dir results_pong_wo_msr/ --wandb-run-name pong-dqn-wo-msr --num-episodes 10000 --memory-size 50000 --lr 0.0001 --target-update-frequency 500 --replay-start-size 5000 --max-episode-steps 100000 --train-per-step 4 --batch-size 32 --replay-buffer-type prioritized --train-frequency 4 --epsilon-decay-steps 50000 --double-dqn --n-step 1 --dueling-dqn --noisy-net --discount-factor 0.99
 
+python dqn.py --env-name ALE/Pong-v5 --save-dir results_pong_wo_preprocessor/ --wandb-run-name pong-dqn-wo-preprocessor --num-episodes 10000 --memory-size 50000 --lr 0.0001 --target-update-frequency 500 --replay-start-size 5000 --max-episode-steps 100000 --train-per-step 4 --batch-size 32 --replay-buffer-type prioritized --train-frequency 4 --epsilon-decay-steps 50000 --double-dqn --n-step 3 --dueling-dqn --noisy-net --discount-factor 0.99 --vanilla-atari-preprocessor
+
+python dqn.py --env-name ALE/Pong-v5 --save-dir results_pong_full/ --wandb-run-name pong-dqn-full --num-episodes 10000 --memory-size 50000 --lr 0.0001 --target-update-frequency 500 --replay-start-size 5000 --max-episode-steps 100000 --train-per-step 4 --batch-size 32 --replay-buffer-type prioritized --train-frequency 4 --epsilon-decay-steps 50000 --double-dqn --n-step 3 --dueling-dqn --discount-factor 0.99 --noisy-net
+
+python dqn.py --env-name ALE/Pong-v5 --save-dir results_pong_full_3/ --wandb-run-name pong-dqn-full-3 --num-episodes 10000 --memory-size 50000 --lr 0.0001 --target-update-frequency 500 --replay-start-size 5000 --max-episode-steps 100000 --train-per-step 4 --batch-size 32 --replay-buffer-type prioritized --train-frequency 4 --epsilon-decay-steps 50000 --double-dqn --n-step 3 --dueling-dqn --discount-factor 0.99 --noisy-net
+
+python test_model.py --model-path /project2/jayinnn/NYCU-deep-learning/lab05/LAB5_110550088_李杰穎_Code/results/best_model.pt --vanilla --hidden-dim 64 --env-name CartPole-v1 --output-dir eval_videos_task1
+
+python test_model.py --model-path /project2/jayinnn/NYCU-deep-learning/lab05/LAB5_110550088_李杰穎_Code/results_pong_vanilla/best_model.pt --vanilla --output-dir eval_videos_task2
+
+python test_model.py --model-path /project2/jayinnn/NYCU-deep-learning/lab05/LAB5_110550088_李杰穎_Code/results_pong_prioritized_ddqn_huber_n_step_3_dueling_noisy_v22/model_step200000.pt --noisy-net --dueling-dqn --output-dir eval_videos_task3_200K
