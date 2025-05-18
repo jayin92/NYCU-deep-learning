@@ -18,8 +18,8 @@ def test(args):
     
     # Create output directories
     os.makedirs(args.output_dir, exist_ok=True)
-    os.makedirs(os.path.join(args.output_dir, "test_images"), exist_ok=True)
-    os.makedirs(os.path.join(args.output_dir, "new_test_images"), exist_ok=True)
+    os.makedirs(os.path.join(args.output_dir, "test"), exist_ok=True)
+    os.makedirs(os.path.join(args.output_dir, "new_test"), exist_ok=True)
     os.makedirs(os.path.join(args.output_dir, "grids"), exist_ok=True)
     os.makedirs(os.path.join(args.output_dir, "denoising_process"), exist_ok=True)
     
@@ -109,14 +109,14 @@ def test(args):
             for j, img in enumerate(samples):
                 idx = i * args.batch_size + j
                 if idx < len(test_data):
-                    save_image(img, os.path.join(args.output_dir, "test_images", f"test_{idx}.png"))
+                    save_image(img, os.path.join(args.output_dir, "test", f"{idx}.png"))
     
     # Concatenate all images and labels
     test_images = torch.cat(test_images)
     test_labels = torch.cat(test_labels)
     
     # Create grid of test images
-    test_grid = make_grid(test_images[:32], nrow=8, normalize=True)
+    test_grid = make_grid(test_images[:32], nrow=8, normalize=False)
     save_image(test_grid, os.path.join(args.output_dir, "grids", "test_grid.png"))
     
     # Calculate accuracy for test.json
@@ -154,7 +154,7 @@ def test(args):
             for j, img in enumerate(samples):
                 idx = i * args.batch_size + j
                 if idx < len(new_test_data):
-                    save_image(img, os.path.join(args.output_dir, "new_test_images", f"new_test_{idx}.png"))
+                    save_image(img, os.path.join(args.output_dir, "new_test", f"{idx}.png"))
     
     # Concatenate all images and labels
     new_test_images = torch.cat(new_test_images)
@@ -242,7 +242,7 @@ def test(args):
     process_images = [(img.clamp(-1, 1) + 1) / 2 for img in process_images]
     
     # Create grid of denoising process
-    process_grid = make_grid(torch.cat(process_images), nrow=len(process_images), normalize=True)
+    process_grid = make_grid(torch.cat(process_images), nrow=len(process_images), normalize=False)
     save_image(process_grid, os.path.join(args.output_dir, "denoising_process", "denoising_process.png"))
     
     # Save individual steps of the denoising process

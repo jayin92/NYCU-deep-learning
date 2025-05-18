@@ -1,0 +1,2 @@
+Accuracy on test.json: 0.9306
+Accuracy on new_test.json: 0.9643
