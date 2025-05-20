@@ -176,8 +176,6 @@ class PPOAgent:
         self.entropy_weight = args.entropy_weight
         self.seed = args.seed
         self.update_epoch = args.update_epoch
-        self.actor_lr = args.actor_lr
-        self.critic_lr = args.critic_lr
         
         # device: cpu / gpu
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -190,8 +188,8 @@ class PPOAgent:
         self.critic = Critic(self.obs_dim).to(self.device)
 
         # optimizer
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.actor_lr)
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.critic_lr)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=0.001)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=0.005)
 
         # memory for training
         self.states: List[torch.Tensor] = []
@@ -501,7 +499,7 @@ class PPOAgent:
                     # if episode ends
                     if done[0][0]:
                         episode_count += 1
-                        state, _ = self.env.reset(seed=self.seed)
+                        state, _ = self.env.reset(seed=self.seed + episode_count)
                         state = np.expand_dims(state, axis=0)
                         scores.append(score)
                         print(f"Episode {episode_count}: Total Reward = {score}")
@@ -622,17 +620,17 @@ def seed_torch(seed):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--wandb-run-name", type=str, default="pendulum-ppo-run")
-    parser.add_argument("--actor-lr", type=float, default=4e-4)
-    parser.add_argument("--critic-lr", type=float, default=4e-3)
+    parser.add_argument("--actor-lr", type=float, default=1e-3)
+    parser.add_argument("--critic-lr", type=float, default=5e-3)
     parser.add_argument("--discount-factor", type=float, default=0.9)
     parser.add_argument("--num-episodes", type=float, default=1000)
     parser.add_argument("--seed", type=int, default=77)
-    parser.add_argument("--entropy-weight", type=float, default=5e-2)  # Changed from int to float
-    parser.add_argument("--tau", type=float, default=0.9)
-    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--entropy-weight", type=float, default=1e-2)  # Changed from int to float
+    parser.add_argument("--tau", type=float, default=0.95)
+    parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--epsilon", type=float, default=0.2)
-    parser.add_argument("--rollout-len", type=int, default=64)
-    parser.add_argument("--update-epoch", type=int, default=10)
+    parser.add_argument("--rollout-len", type=int, default=1024)  
+    parser.add_argument("--update-epoch", type=int, default=64)
     parser.add_argument("--checkpoint-dir", type=str, default="./output_ppo", 
                         help="Directory to save checkpoints")
     parser.add_argument("--checkpoint-freq", type=int, default=10, 

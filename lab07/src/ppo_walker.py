@@ -601,7 +601,8 @@ class PPOAgent:
                     if done[0][0]:
                         episode_count += 1
                         pbar.update(1)
-                        state, _ = self.env.reset(seed=self.seed)
+                        episode_seed = np.random.randint(2**32)
+                        state, _ = self.env.reset(seed=episode_seed)
                         state = np.expand_dims(state, axis=0)
                         scores.append(score)
                         pbar.write(f"Episode {episode_count}: Total Reward = {score}")
@@ -717,17 +718,17 @@ def seed_torch(seed):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--wandb-run-name", type=str, default="walker-ppo-run")
-    parser.add_argument("--actor-lr", type=float, default=4e-4)
-    parser.add_argument("--critic-lr", type=float, default=1e-3)
+    parser.add_argument("--actor-lr", type=float, default=5e-5)
+    parser.add_argument("--critic-lr", type=float, default=2e-4)
     parser.add_argument("--discount-factor", type=float, default=0.99)
     parser.add_argument("--num-episodes", type=int, default=10000)
     parser.add_argument("--seed", type=int, default=77)
-    parser.add_argument("--entropy-weight", type=float, default=0.01) # entropy can be disabled by setting this to 0
-    parser.add_argument("--tau", type=float, default=0.97)
-    parser.add_argument("--batch-size", type=int, default=256)
-    parser.add_argument("--epsilon", type=float, default=0.2)
-    parser.add_argument("--rollout-len", type=int, default=2048)  
-    parser.add_argument("--update-epoch", type=int, default=10)
+    parser.add_argument("--entropy-weight", type=float, default=1e-2) # entropy can be disabled by setting this to 0
+    parser.add_argument("--tau", type=float, default=0.95)
+    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--epsilon", type=float, default=0.1)
+    parser.add_argument("--rollout-len", type=int, default=512)  
+    parser.add_argument("--update-epoch", type=int, default=20)
     parser.add_argument("--checkpoint-dir", type=str, default="./output_walker", 
                         help="Directory to save checkpoints")
     parser.add_argument("--checkpoint-freq", type=int, default=10, 

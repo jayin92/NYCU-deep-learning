@@ -1,2 +1,2 @@
 python src/a2c_pendulum.py --eval --checkpoint output/a2c_pendulum_checkpoint_best.pth --hidden-dim 32 --num-eval-episodes 20 --valid-seeds 77,78,80,81,83,84,86,88,90,91,94,96,97,99,103,105,107,114,115,121,123,124,128,129,130,131,135
-python src/ppo_pendulum.py --eval --checkpoint output_ppo/ppo_pendulum_epfinal_.pt --num-test-episodes 20 --valid-seeds 77,78,80,83,84,86,87,89,92,95,96,97,99,103,105,107,109,114,115,121,123,124,128,131,135
+python src/ppo_pendulum.py --eval --checkpoint output_ppo_pendulum_new/best_ppo_pendulum.pt --num-test-episodes 20 --valid-seeds 78,81,83,86,87,88,89,90,91,92,94,95,97,99,103,105,107,109,121,123,128,129,130,131,135
