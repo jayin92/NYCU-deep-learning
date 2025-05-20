@@ -209,6 +209,8 @@ class PPOAgent:
         self.entropy_weight = args.entropy_weight
         self.seed = args.seed
         self.update_epoch = args.update_epoch
+        self.actor_lr = args.actor_lr
+        self.critic_lr = args.critic_lr
         
         # device: cpu / gpu
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -221,8 +223,8 @@ class PPOAgent:
         self.critic = Critic(self.obs_dim).to(self.device)
 
         # optimizer
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=0.001)
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=0.005)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.actor_lr, eps=1e-5)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.critic_lr, eps=1e-5)
 
         # memory for training
         self.states: List[torch.Tensor] = []
@@ -720,8 +722,8 @@ if __name__ == "__main__":
     parser.add_argument("--discount-factor", type=float, default=0.99)
     parser.add_argument("--num-episodes", type=int, default=10000)
     parser.add_argument("--seed", type=int, default=77)
-    parser.add_argument("--entropy-weight", type=float, default=0.005) # entropy can be disabled by setting this to 0
-    parser.add_argument("--tau", type=float, default=0.95)
+    parser.add_argument("--entropy-weight", type=float, default=0.01) # entropy can be disabled by setting this to 0
+    parser.add_argument("--tau", type=float, default=0.97)
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--epsilon", type=float, default=0.2)
     parser.add_argument("--rollout-len", type=int, default=2048)  

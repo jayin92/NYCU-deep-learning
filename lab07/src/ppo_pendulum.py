@@ -176,6 +176,8 @@ class PPOAgent:
         self.entropy_weight = args.entropy_weight
         self.seed = args.seed
         self.update_epoch = args.update_epoch
+        self.actor_lr = args.actor_lr
+        self.critic_lr = args.critic_lr
         
         # device: cpu / gpu
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -188,8 +190,8 @@ class PPOAgent:
         self.critic = Critic(self.obs_dim).to(self.device)
 
         # optimizer
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=0.001)
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=0.005)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.actor_lr)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.critic_lr)
 
         # memory for training
         self.states: List[torch.Tensor] = []
