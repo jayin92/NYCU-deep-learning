@@ -239,8 +239,10 @@ class PPOAgent:
 
         # mode: train / test
         self.is_test = False
-
-        self.run_id = wandb.run.id if not self.is_test else "test_run"
+        try:
+            self.run_id = wandb.run.id if not self.is_test else "test_run"
+        except Exception as e:
+            self.run_id = "test_run"
         self.num_eval_episodes = args.num_test_episodes  # Or get from args
         self.reward_threshold = 2500  # Based on lab requirements
         self.best_eval_score = float('-inf')

@@ -58,6 +58,7 @@ def evaluate_and_record(env, args):
         normalize_reward=False,
         checkpoint_dir="./output_walker",
         checkpoint_freq=10,
+        num_episodes=args.num_episodes,
         num_test_episodes=args.num_episodes,
         milestones=[1_000_000, 1_500_000, 2_000_000, 2_500_000, 3_000_000]
     )
