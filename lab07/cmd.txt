@@ -1,0 +1,1 @@
+python src/a2c_pendulum.py --eval --checkpoint output/a2c_pendulum_checkpoint_best.pth --hidden-dim 32 --num-test-episodes 20 --valid-seeds 77,78,80,81,83,84,86,88,90,91,94,96,97,99,103,105,107,114,115,121,123,124,128,129,130,131,135
