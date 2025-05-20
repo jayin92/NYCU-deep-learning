@@ -80,8 +80,9 @@ class Actor(nn.Module):
         super(Actor, self).__init__()
 
         # Network layers
-        self.fc1 = nn.Linear(in_dim, 128)
-        self.fc2 = nn.Linear(128, 128)
+        self.fc1 = nn.Linear(in_dim, 256)
+        self.fc2 = nn.Linear(256, 256)
+        self.fc3 = nn.Linear(256, 128)
         self.mu = nn.Linear(128, out_dim)
         # self.log_std = nn.Linear(32, out_dim)
         self.logstds = nn.Parameter(torch.full((out_dim,), 0.5)) # Higher initial exploration
@@ -90,8 +91,8 @@ class Actor(nn.Module):
         # Initialize weights
         initialize_orthogonal(self.fc1, gain=np.sqrt(2))
         initialize_orthogonal(self.fc2, gain=np.sqrt(2))
+        initialize_orthogonal(self.fc3, gain=np.sqrt(2))
         initialize_orthogonal(self.mu, gain=0.01)
-        # init_layer_uniform(self.log_std)
         
         self.std_min = std_min
         self.std_max = std_max
@@ -101,6 +102,7 @@ class Actor(nn.Module):
         """Forward method implementation."""
         x = self.activation(self.fc1(state))
         x = self.activation(self.fc2(x))
+        x = self.activation(self.fc3(x))
         
         # Mean and standard deviation for Gaussian policy
         mu = self.mu(x)
@@ -120,9 +122,9 @@ class Critic(nn.Module):
         """Initialize."""
         super(Critic, self).__init__()
         
-        self.fc1 = nn.Linear(in_dim, 128)
-        self.fc2 = nn.Linear(128, 128)
-        self.fc3 = nn.Linear(128, 1)  # Critic outputs a single value
+        self.fc1 = nn.Linear(in_dim, 256)
+        self.fc2 = nn.Linear(256, 256)
+        self.fc3 = nn.Linear(256, 1)  # Critic outputs a single value
         self.activation = activation()
         
         # Initialize weights
@@ -347,6 +349,7 @@ class PPOAgent:
         values = torch.cat(self.values).detach()
         log_probs = torch.cat(self.log_probs).detach()
         advantages = returns - values
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
         actor_losses, critic_losses = [], []
 
@@ -364,6 +367,7 @@ class PPOAgent:
             _, dist = self.actor(state)
             log_prob = dist.log_prob(action)
             ratio = (log_prob - old_log_prob).exp()
+            # adv = (adv - adv.mean()) / (adv.std() + 1e-8)  # Normalize advantage, inside mini-batch, instead of across the whole batch
 
             # actor_loss
             surrogate1 = ratio * adv
@@ -375,7 +379,7 @@ class PPOAgent:
             
             # critic_loss
             critic_value = self.critic(state)
-            critic_loss = F.smooth_l1_loss(critic_value, return_)
+            critic_loss = 0.5 * F.smooth_l1_loss(critic_value, return_)
             
             # train critic
             self.critic_optimizer.zero_grad()
@@ -437,13 +441,7 @@ class PPOAgent:
             episode_score = 0.0
             
             while not done:
-                # Use normalized observations for selecting actions
-                if self.normalize_obs:
-                    normalized_state = self.obs_rms.normalize(state_np)
-                    normalized_state = np.clip(normalized_state, -self.clip_obs, self.clip_obs)
-                    action_np = self.select_action(normalized_state)
-                else:
-                    action_np = self.select_action(state_np)
+                action_np = self.select_action(state_np) # We don't need to normalize the state here, the select_action function will handle it
                 
                 next_state_np, reward_np, terminated, truncated, _ = current_test_env.step(action_np)
                 done = terminated or truncated
@@ -718,15 +716,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--wandb-run-name", type=str, default="walker-ppo-run")
     parser.add_argument("--actor-lr", type=float, default=4e-4)
-    parser.add_argument("--critic-lr", type=float, default=4e-3)
+    parser.add_argument("--critic-lr", type=float, default=1e-3)
     parser.add_argument("--discount-factor", type=float, default=0.99)
     parser.add_argument("--num-episodes", type=int, default=10000)
     parser.add_argument("--seed", type=int, default=77)
-    parser.add_argument("--entropy-weight", type=float, default=1e-2) # entropy can be disabled by setting this to 0
+    parser.add_argument("--entropy-weight", type=float, default=0.005) # entropy can be disabled by setting this to 0
     parser.add_argument("--tau", type=float, default=0.95)
-    parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--epsilon", type=float, default=0.2)
-    parser.add_argument("--rollout-len", type=int, default=512)  
+    parser.add_argument("--rollout-len", type=int, default=2048)  
     parser.add_argument("--update-epoch", type=int, default=10)
     parser.add_argument("--checkpoint-dir", type=str, default="./output_walker", 
                         help="Directory to save checkpoints")
@@ -738,8 +736,8 @@ if __name__ == "__main__":
     parser.add_argument("--num-test-episodes", type=int, default=5)
     parser.add_argument("--valid-seeds", type=str, default=None,
                     help="Comma-separated list of valid seeds for testing")
-    parser.add_argument("--normalize_reward", action="store_true", default=False)
-    parser.add_argument("--normalize_obs", action="store_true", default=False)
+    parser.add_argument("--normalize-reward", action="store_true", default=False)
+    parser.add_argument("--normalize-obs", action="store_true", default=False)
     args = parser.parse_args()
     
     args.milestones = [1_000_000, 1_500_000, 2_000_000, 2_500_000, 3_000_000, 3_500_000, 4_000_000]
